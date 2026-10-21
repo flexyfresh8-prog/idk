@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Discord AI Self-Bot Dashboard</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+  <style>
+    body { background: #1a1d23; color: #e9ecef; font-family: 'Segoe UI', system-ui, sans-serif; }
+    .card { background: #242830; border: 1px solid #343a40; margin-bottom: 1rem; }
+    .card-header { background: #1f2329; border-bottom: 1px solid #343a40; font-weight: 600; }
+    .btn { border-radius: 6px; }
+    .btn-success { background: #2ecc71; border-color: #2ecc71; }
+    .btn-danger { background: #e74c3c; border-color: #e74c3c; }
+    .btn-warning { background: #f39c12; border-color: #f39c12c; color: #1a1d23; }
+    .status-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; }
+    .status-dot.online { background: #2ecc71; box-shadow: 0 0 6px #2ecc71; }
+    .status-dot.offline { background: #e74c3c; }
+    .log-box { background: #0d1117; border: 1px solid #343a40; border-radius: 6px;
+               height: 360px; overflow-y: auto; padding: 10px;
+               font-family: 'Consolas', 'Monaco', monospace; font-size: 12px; }
+    .log-line { white-space: pre-wrap; word-break: break-word; line-height: 1.4; }
+    .log-line.error { color: #ff6b6b; }
+    .log-line.warning { color: #ffd166; }
+    .log-line.info { color: #8dd0ff; }
+    code.token { color: #ffd166; }
+    .config-row { padding: 4px 0; border-bottom: 1px solid #2c313a; }
+    .config-row:last-child { border-bottom: none; }
+    h1.app-title { font-weight: 700; letter-spacing: -0.5px; }
+    .badge-warn { background: #f39c12; color: #1a1d23; }
+  </style>
+</head>
+<body>
+  <div class="container-fluid py-4 px-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <h1 class="app-title mb-0">
+        <i class="bi bi-robot text-primary"></i>
+        Discord AI Self-Bot Dashboard
+      </h1>
+      <span class="badge bg-danger">ToS-violating selfbot — use burner account</span>
+    </div>
+
+    <div class="row">
+      <!-- LEFT: Status + Controls -->
+      <div class="col-lg-5">
+        <div class="card">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-activity"></i> Bot Status</span>
+            <span>
+              <span id="status-dot" class="status-dot offline"></span>
+              <span id="status-text" class="ms-2">Offline</span>
+            </span>
+          </div>
+          <div class="card-body">
+            <p class="mb-2"><strong>Uptime:</strong> <span id="uptime">0s</span></p>
+            <p class="mb-2"><strong>Last error:</strong> <span id="last-error" class="text-warning">—</span></p>
+            <div class="d-flex gap-2 mt-3">
+              <button id="btn-start" class="btn btn-success flex-grow-1">
+                <i class="bi bi-play-fill"></i> Start Bot
+              </button>
+              <button id="btn-stop" class="btn btn-danger flex-grow-1" disabled>
+                <i class="bi bi-stop-fill"></i> Stop Bot
+              </button>
+            </div>
+            <button id="btn-reload" class="btn btn-secondary w-100 mt-2">
+              <i class="bi bi-arrow-clockwise"></i> Reload .env (applies on next start)
+            </button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><i class="bi bi-gear"></i> Configuration</div>
+          <div class="card-body">
+            <div class="config-row"><strong>AI Provider:</strong> <span id="cfg-provider">—</span></div>
+            <div class="config-row"><strong>AI Model:</strong> <span id="cfg-model">—</span></div>
+            <div class="config-row"><strong>Target User ID:</strong> <span id="cfg-target">—</span></div>
+            <div class="config-row"><strong>Discord token:</strong> <span id="cfg-token" class="text-warning">missing</span></div>
+            <div class="config-row"><strong>AI API key:</strong> <span id="cfg-aikey" class="text-warning">missing</span></div>
+            <p class="small text-muted mt-3 mb-0">
+              Edit <code>.env</code> in the project folder, then click "Reload .env" + "Start Bot".
+            </p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><i class="bi bi-send"></i> Send DM to Target User</div>
+          <div class="card-body">
+            <textarea id="send-text" class="form-control mb-2" rows="3" placeholder="Type a message to DM the target user..."></textarea>
+            <button id="btn-send" class="btn btn-primary w-100" disabled>
+              <i class="bi bi-send-fill"></i> Send DM
+            </button>
+            <p class="small text-muted mt-2 mb-0">Bot must be running for this to work.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: Logs -->
+      <div class="col-lg-7">
+        <div class="card h-100">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-terminal"></i> Live Logs</span>
+            <div>
+              <span class="badge bg-secondary me-2" id="log-count">0 lines</span>
+              <label class="form-check-label small me-2">
+                <input type="checkbox" id="autoscroll" checked> auto-scroll
+              </label>
+              <button id="btn-clear-logs" class="btn btn-sm btn-outline-secondary">
+                <i class="bi bi-trash"></i>
+              </button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div id="log-box" class="log-box">
+              <div class="text-muted small">Logs will appear here once the bot starts...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <footer class="mt-4 text-center text-muted small">
+      Discord AI Self-Bot Dashboard — runs on a user account (ToS violation). Use responsibly.
+    </footer>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const logBox = $('log-box');
+    let logsSeen = 0;
+
+    function fmtUptime(s) {
+      s = Math.max(0, Math.floor(s));
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      const sec = s % 60;
+      if (h > 0) return `${h}h ${m}m ${sec}s`;
+      if (m > 0) return `${m}m ${sec}s`;
+      return `${sec}s`;
+    }
+
+    function escapeHtml(s) {
+      return String(s || '').replace(/[&<>"']/g, c => ({
+        '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+      }[c]));
+    }
+
+    function renderLogs(logs) {
+      if (!logs || logs.length === 0) {
+        logBox.innerHTML = '<div class="text-muted small">No logs yet.</div>';
+        $('log-count').textContent = '0 lines';
+        return;
+      }
+      logBox.innerHTML = logs.map(line => {
+        let cls = 'log-line';
+        if (/error/i.test(line)) cls += ' error';
+        else if (/warn/i.test(line)) cls += ' warning';
+        else cls += ' info';
+        return `<div class="${cls}">${escapeHtml(line)}</div>`;
+      }).join('');
+      $('log-count').textContent = `${logs.length} lines`;
+      if ($('autoscroll').checked) logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    async function fetchStatus() {
+      try {
+        const r = await fetch('/api/status');
+        const j = await r.json();
+        const running = !!j.running;
+        $('status-dot').className = 'status-dot ' + (running ? 'online' : 'offline');
+        $('status-text').textContent = running ? 'Online' : 'Offline';
+        $('uptime').textContent = fmtUptime(j.uptime);
+        $('last-error').textContent = j.last_error || '—';
+        $('btn-start').disabled = running;
+        $('btn-stop').disabled = !running;
+        $('btn-send').disabled = !running;
+        $('cfg-provider').textContent = j.config.ai_provider || '—';
+        $('cfg-model').textContent = j.config.ai_model || '—';
+        $('cfg-target').textContent = j.config.target_user_id || '—';
+        $('cfg-token').textContent = j.config.has_discord_token ? 'set' : 'missing';
+        $('cfg-token').className = j.config.has_discord_token ? 'text-success' : 'text-warning';
+        $('cfg-aikey').textContent = j.config.has_ai_key ? 'set' : 'missing';
+        $('cfg-aikey').className = j.config.has_ai_key ? 'text-success' : 'text-warning';
+        renderLogs(j.logs);
+      } catch (e) {
+        console.error('status fetch failed', e);
+      }
+    }
+
+    async function callApi(url, method='POST', body=null) {
+      const opts = { method, headers: {'Content-Type': 'application/json'} };
+      if (body) opts.body = JSON.stringify(body);
+      try {
+        const r = await fetch(url, opts);
+        const j = await r.json();
+        if (!r.ok || !j.ok) {
+          alert('Error: ' + (j.error || j.msg || `HTTP ${r.status}`));
+        } else if (j.msg) {
+          console.log(j.msg);
+        }
+      } catch (e) {
+        alert('Network error: ' + e.message);
+      }
+      fetchStatus();
+    }
+
+    $('btn-start').addEventListener('click', () => callApi('/api/start'));
+    $('btn-stop').addEventListener('click', () => callApi('/api/stop'));
+    $('btn-reload').addEventListener('click', () => callApi('/api/reload'));
+    $('btn-send').addEventListener('click', () => {
+      const text = $('send-text').value.trim();
+      if (!text) { alert('Enter a message first'); return; }
+      callApi('/api/send', 'POST', { text });
+    });
+    $('btn-clear-logs').addEventListener('click', () => {
+      logBox.innerHTML = '<div class="text-muted small">Logs cleared (client-side only).</div>';
+    });
+
+    // Poll every 2 seconds
+    fetchStatus();
+    setInterval(fetchStatus, 2000);
+  </script>
+</body>
+</html>

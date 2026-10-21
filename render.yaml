@@ -1,0 +1,33 @@
+# Render.com Blueprint config — deploy with one click
+# https://render.com/docs/blueprints
+services:
+  - type: web
+    name: discord-ai-selfbot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn -w 1 --threads 4 -t 120 --bind 0.0.0.0:$PORT app:app --access-logfile -
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.6"
+      # Secrets — set these in the Render dashboard after deploy
+      - key: DISCORD_USER_TOKEN
+        sync: false
+      - key: AI_API_KEY
+        sync: false
+      - key: TARGET_USER_ID
+        sync: false
+      # Non-secret defaults
+      - key: AI_PROVIDER
+        value: openrouter
+      - key: AI_MODEL
+        value: meta-llama/llama-3.2-3b-instruct:free
+      - key: STARTUP_MESSAGE
+        value: ""
+      - key: SYSTEM_PROMPT
+        value: "You are a helpful, concise AI assistant responding in a Discord chat."
+      - key: MAX_HISTORY
+        value: "10"
+      - key: TYPING_BASE_SEC
+        value: "1.5"
+      - key: TYPING_MAX_SEC
+        value: "8.0"

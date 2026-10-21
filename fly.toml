@@ -1,0 +1,19 @@
+# Fly.io config
+# Run: fly launch --no-deploy  (then fly deploy when ready)
+app = "discord-ai-selfbot"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 5000
+  force_https = true
+  auto_stop_machines = false   # IMPORTANT: keep the bot alive 24/7
+  auto_start_machines = true
+  min_machines_running = 1     # never spin down (so the bot stays connected)
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512

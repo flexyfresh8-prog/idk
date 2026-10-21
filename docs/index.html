@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Discord AI Self-Bot — Configurator</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+  <style>
+    body { background: #1a1d23; color: #e9ecef; font-family: 'Segoe UI', system-ui, sans-serif; }
+    .card { background: #242830; border: 1px solid #343a40; margin-bottom: 1rem; }
+    .card-header { background: #1f2329; border-bottom: 1px solid #343a40; font-weight: 600; }
+    .btn { border-radius: 6px; }
+    .btn-success { background: #2ecc71; border-color: #2ecc71; }
+    .btn-primary { background: #3498db; border-color: #3498db; }
+    .btn-warning { background: #f39c12; border-color: #f39c12; color: #1a1d23; }
+    .form-control, .form-select, textarea { background: #1a1d23; color: #e9ecef; border-color: #343a40; }
+    .form-control:focus, .form-select:focus, textarea:focus { background: #1a1d23; color: #e9ecef; border-color: #3498db; box-shadow: 0 0 0 0.2rem rgba(52,152,219,0.25); }
+    .form-label { font-weight: 500; color: #ced4da; margin-bottom: 0.25rem; }
+    .form-text { color: #6c757d; font-size: 0.85em; }
+    .input-group-text { background: #2c313a; color: #e9ecef; border-color: #343a40; }
+    .badge-set { background: #2ecc71; color: #1a1d23; }
+    .badge-missing { background: #e74c3c; }
+    h1.app-title { font-weight: 700; letter-spacing: -0.5px; }
+    .toast-container { position: fixed; top: 20px; right: 20px; z-index: 9999; max-width: 360px; }
+    .toast-msg { background: #242830; border: 1px solid #343a40; color: #e9ecef; padding: 12px 16px; border-radius: 6px; margin-bottom: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
+    .toast-msg.success { border-left: 4px solid #2ecc71; }
+    .toast-msg.error { border-left: 4px solid #e74c3c; }
+    .toast-msg.info { border-left: 4px solid #3498db; }
+    .hero { background: linear-gradient(135deg, #242830 0%, #1a1d23 100%); border: 1px solid #343a40; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; }
+    .hero h2 { margin-bottom: 0.5rem; }
+    .deploy-card { background: #1f2329; border: 1px solid #343a40; border-radius: 6px; padding: 1rem; margin-bottom: 1rem; }
+    .deploy-card h6 { color: #3498db; margin-bottom: 0.5rem; }
+    .deploy-card pre { background: #0d1117; border: 1px solid #343a40; padding: 0.75rem; border-radius: 4px; overflow-x: auto; font-size: 0.85rem; }
+    .deploy-card code { color: #ffd166; }
+    .btn-deploy { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 6px; text-decoration: none; font-weight: 500; }
+    .btn-deploy.fly { background: #9b59b6; color: #fff; }
+    .btn-deploy.render { background: #4630eb; color: #fff; }
+    .btn-deploy:hover { opacity: 0.9; color: #fff; text-decoration: none; }
+    .saved-indicator { font-size: 0.85em; color: #2ecc71; }
+    .alert-warning { background: #3d2817; border-color: #f39c12; color: #ffd166; }
+    a { color: #3498db; }
+    a:hover { color: #5dade2; }
+  </style>
+</head>
+<body>
+  <div class="container py-4 px-4" style="max-width: 1100px;">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h1 class="app-title mb-0">
+        <i class="bi bi-robot text-primary"></i>
+        Discord AI Self-Bot — Configurator
+      </h1>
+      <span class="badge bg-secondary"><i class="bi bi-github"></i> GitHub Pages</span>
+    </div>
+
+    <div class="hero">
+      <h2><i class="bi bi-info-circle text-info"></i> What this page is (and isn't)</h2>
+      <p class="mb-2"><strong>This is a static configuration form.</strong> It runs entirely in your browser — nothing is sent to any server. Your settings are saved in <code>localStorage</code> on this device only.</p>
+      <p class="mb-2"><strong>It is NOT a live bot dashboard.</strong> To actually run the Discord bot, you still need to either:</p>
+      <ul>
+        <li>Run <code>python app.py</code> locally with the downloaded <code>.env</code> file, OR</li>
+        <li>Deploy the Flask dashboard to a free always-on host (Fly.io recommended — see Deploy section below)</li>
+      </ul>
+      <p class="mb-0 text-warning"><i class="bi bi-exclamation-triangle"></i> Self-bots violate Discord's ToS — use a burner account. See <a href="https://github.com/flexyfresh8-prog/idk#readme" target="_blank">the README</a>.</p>
+    </div>
+
+    <!-- =========== ACTION BAR =========== -->
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-lightning"></i> Actions</span>
+        <span class="small text-muted">Status: <span id="save-status" class="saved-indicator">no changes yet</span></span>
+      </div>
+      <div class="card-body">
+        <div class="d-flex flex-wrap gap-2">
+          <button id="btn-download" class="btn btn-success">
+            <i class="bi bi-download"></i> Download .env
+          </button>
+          <button id="btn-copy" class="btn btn-primary">
+            <i class="bi bi-clipboard"></i> Copy .env to clipboard
+          </button>
+          <button id="btn-upload" class="btn btn-secondary">
+            <i class="bi bi-upload"></i> Load from .env file
+          </button>
+          <button id="btn-fill-defaults" class="btn btn-secondary">
+            <i class="bi bi-magic"></i> Fill defaults
+          </button>
+          <button id="btn-clear" class="btn btn-outline-danger">
+            <i class="bi bi-trash"></i> Clear all
+          </button>
+          <input type="file" id="file-input" accept=".env,text/plain" style="display:none">
+        </div>
+        <p class="small text-muted mt-2 mb-0">
+          Saved automatically to your browser's <code>localStorage</code>. Use "Download .env" to get a file you can drop into the project folder.
+        </p>
+      </div>
+    </div>
+
+    <!-- =========== CONFIG FORM =========== -->
+    <div class="card">
+      <div class="card-header"><i class="bi bi-gear"></i> Configuration</div>
+      <div class="card-body">
+        <!-- SECRETS -->
+        <h6 class="text-uppercase text-muted mb-3"><i class="bi bi-key"></i> Secrets</h6>
+        <div class="row g-3 mb-4">
+          <div class="col-12">
+            <label class="form-label">Discord User Token</label>
+            <div class="input-group">
+              <input type="password" id="DISCORD_USER_TOKEN" class="form-control" placeholder="Paste your Discord user account token..." autocomplete="off">
+              <button class="btn btn-outline-secondary" type="button" data-toggle-pw="DISCORD_USER_TOKEN"><i class="bi bi-eye"></i></button>
+              <span class="input-group-text"><span id="badge-DISCORD_USER_TOKEN" class="badge badge-missing">empty</span></span>
+            </div>
+            <div class="form-text">Extract from Discord desktop browser → F12 → Network tab → Authorization header. <strong>Never share this.</strong></div>
+          </div>
+          <div class="col-12">
+            <label class="form-label">AI API Key</label>
+            <div class="input-group">
+              <input type="password" id="AI_API_KEY" class="form-control" placeholder="Paste your OpenRouter / HF / OpenAI key..." autocomplete="off">
+              <button class="btn btn-outline-secondary" type="button" data-toggle-pw="AI_API_KEY"><i class="bi bi-eye"></i></button>
+              <span class="input-group-text"><span id="badge-AI_API_KEY" class="badge badge-missing">empty</span></span>
+            </div>
+            <div class="form-text">Get one free at <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a> (sign in → Keys → Create Key).</div>
+          </div>
+        </div>
+
+        <hr class="border-secondary">
+
+        <!-- AI -->
+        <h6 class="text-uppercase text-muted mb-3"><i class="bi bi-cpu"></i> AI Provider</h6>
+        <div class="row g-3 mb-4">
+          <div class="col-md-4">
+            <label class="form-label">Provider</label>
+            <select id="AI_PROVIDER" class="form-select">
+              <option value="openrouter">OpenRouter (free models)</option>
+              <option value="huggingface">Hugging Face</option>
+              <option value="openai">OpenAI</option>
+              <option value="custom">Custom endpoint</option>
+            </select>
+          </div>
+          <div class="col-md-8">
+            <label class="form-label">Model</label>
+            <input type="text" id="AI_MODEL" class="form-control" placeholder="meta-llama/llama-3.2-3b-instruct:free">
+            <div class="form-text">
+              OpenRouter free models: <code>meta-llama/llama-3.2-3b-instruct:free</code>,
+              <code>google/gemma-2-9b-it:free</code>,
+              <code>qwen/qwen-2.5-7b-instruct:free</code>,
+              <code>meta-llama/llama-3.3-70b-instruct:free</code>
+            </div>
+          </div>
+          <div class="col-12">
+            <label class="form-label">Custom base URL <span class="text-muted">(optional — only used if provider is "custom")</span></label>
+            <input type="text" id="AI_BASE_URL" class="form-control" placeholder="https://your-endpoint/v1">
+          </div>
+        </div>
+
+        <hr class="border-secondary">
+
+        <!-- TARGET USER -->
+        <h6 class="text-uppercase text-muted mb-3"><i class="bi bi-person-badge"></i> Target User</h6>
+        <div class="row g-3 mb-4">
+          <div class="col-md-6">
+            <label class="form-label">Target User ID</label>
+            <input type="text" id="TARGET_USER_ID" class="form-control" placeholder="987654321098765432" inputmode="numeric" pattern="[0-9]+">
+            <div class="form-text">Enable Developer Mode in Discord → right-click user → Copy User ID.</div>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Startup DM <span class="text-muted">(optional — sent once on bot start)</span></label>
+            <input type="text" id="STARTUP_MESSAGE" class="form-control" placeholder="Hey, I'm online!">
+          </div>
+        </div>
+
+        <hr class="border-secondary">
+
+        <!-- PERSONALITY -->
+        <h6 class="text-uppercase text-muted mb-3"><i class="bi bi-chat-square-text"></i> Personality</h6>
+        <div class="row g-3 mb-4">
+          <div class="col-12">
+            <label class="form-label">System Prompt</label>
+            <textarea id="SYSTEM_PROMPT" class="form-control" rows="3" placeholder="You are a helpful, concise AI assistant..."></textarea>
+          </div>
+        </div>
+
+        <hr class="border-secondary">
+
+        <!-- BEHAVIOR -->
+        <h6 class="text-uppercase text-muted mb-3"><i class="bi bi-sliders"></i> Behavior</h6>
+        <div class="row g-3 mb-4">
+          <div class="col-md-3">
+            <label class="form-label">Max history (msgs)</label>
+            <input type="number" id="MAX_HISTORY" class="form-control" min="0" max="100" value="10">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Max reply chars</label>
+            <input type="number" id="MAX_RESPONSE_CHARS" class="form-control" min="100" max="1900" value="1900">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Typing min (s)</label>
+            <input type="number" step="0.1" id="TYPING_BASE_SEC" class="form-control" min="0" max="60" value="1.5">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Typing per-char (s)</label>
+            <input type="number" step="0.001" id="TYPING_PER_CHAR_SEC" class="form-control" min="0" max="1" value="0.012">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Typing max (s)</label>
+            <input type="number" step="0.1" id="TYPING_MAX_SEC" class="form-control" min="0" max="60" value="8.0">
+          </div>
+        </div>
+
+        <hr class="border-secondary">
+
+        <!-- ADVANCED -->
+        <h6 class="text-uppercase text-muted mb-3"><i class="bi bi-gear-wide-connected"></i> Advanced</h6>
+        <div class="row g-3 mb-2">
+          <div class="col-md-6">
+            <label class="form-label">Channel whitelist <span class="text-muted">(comma-separated IDs, empty = all)</span></label>
+            <input type="text" id="CHANNEL_WHITELIST" class="form-control" placeholder="123456789012345678,987654321098765432">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">OpenRouter referer <span class="text-muted">(opt.)</span></label>
+            <input type="text" id="OPENROUTER_REFERER" class="form-control" placeholder="https://github.com/...">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">OpenRouter title <span class="text-muted">(opt.)</span></label>
+            <input type="text" id="OPENROUTER_TITLE" class="form-control" placeholder="Discord AI Bot">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- =========== DEPLOYMENT =========== -->
+    <div class="card">
+      <div class="card-header"><i class="bi bi-rocket-takeoff"></i> Deployment</div>
+      <div class="card-body">
+        <p class="text-muted small mb-3">
+          The bot itself can't run on GitHub Pages (no Python runtime). Pick one of these options to actually run the bot — then visit your bot's URL to use the live dashboard.
+        </p>
+
+        <!-- FLY.IO -->
+        <div class="deploy-card">
+          <h6><i class="bi bi-cloud"></i> Option 1: Fly.io (recommended — free always-on)</h6>
+          <ol class="mb-2">
+            <li>Install <code>flyctl</code>: <a href="https://fly.io/docs/hands-on/install-flyctl/" target="_blank">instructions here</a></li>
+            <li>Clone the repo: <code>git clone https://github.com/flexyfresh8-prog/idk.git</code> &amp; <code>cd idk</code></li>
+            <li>Launch &amp; set secrets &amp; deploy:</li>
+          </ol>
+<pre>fly launch --no-deploy
+fly secrets set DISCORD_USER_TOKEN=<span class="text-warning">&lt;your-token&gt;</span>
+fly secrets set AI_API_KEY=<span class="text-warning">&lt;your-key&gt;</span>
+fly secrets set TARGET_USER_ID=<span class="text-warning">&lt;your-target-id&gt;</span>
+fly deploy</pre>
+          <p class="small mb-0">Fly will give you a URL like <code>https://discord-ai-selfbot.fly.dev</code> — that's your live dashboard.</p>
+        </div>
+
+        <!-- RENDER -->
+        <div class="deploy-card">
+          <h6><i class="bi bi-box"></i> Option 2: Render (easier UI, but free tier sleeps after 15 min idle)</h6>
+          <ol class="mb-2">
+            <li>Sign up at <a href="https://render.com" target="_blank">render.com</a></li>
+            <li>New → Web Service → connect your GitHub account → select <code>flexyfresh8-prog/idk</code></li>
+            <li>Render auto-detects <code>render.yaml</code> → click Apply</li>
+            <li>Set the secret env vars in Render's dashboard: <code>DISCORD_USER_TOKEN</code>, <code>AI_API_KEY</code>, <code>TARGET_USER_ID</code></li>
+            <li>Deploy → visit the URL Render gives you</li>
+          </ol>
+          <p class="small text-warning mb-0"><i class="bi bi-exclamation-triangle"></i> Free Render web services spin down after 15 min of inactivity, killing the bot. Upgrade to $7/mo Starter for 24/7.</p>
+        </div>
+
+        <!-- LOCAL -->
+        <div class="deploy-card">
+          <h6><i class="bi bi-laptop"></i> Option 3: Run locally (easiest, but only works while your computer is on)</h6>
+          <ol class="mb-2">
+            <li>Clone the repo: <code>git clone https://github.com/flexyfresh8-prog/idk.git</code></li>
+            <li>Download the <code>.env</code> file using the button above and place it in the project folder</li>
+            <li>Install &amp; run:</li>
+          </ol>
+<pre>pip install -r requirements.txt
+python app.py</pre>
+          <p class="small mb-0">Open <code>http://localhost:5000</code> in your browser → click Start Bot.</p>
+        </div>
+      </div>
+    </div>
+
+    <footer class="text-center text-muted small mt-4 mb-3">
+      Discord AI Self-Bot Configurator — static page on GitHub Pages.
+      <br>
+      Self-bots violate Discord's ToS. Use a burner account. <a href="https://github.com/flexyfresh8-prog/idk#readme" target="_blank">README</a>
+    </footer>
+  </div>
+
+  <div class="toast-container" id="toast-container"></div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    // All whitelisted config keys
+    const KEYS = [
+      'DISCORD_USER_TOKEN', 'AI_PROVIDER', 'AI_API_KEY', 'AI_MODEL', 'AI_BASE_URL',
+      'TARGET_USER_ID', 'STARTUP_MESSAGE', 'SYSTEM_PROMPT', 'MAX_HISTORY',
+      'MAX_RESPONSE_CHARS', 'TYPING_BASE_SEC', 'TYPING_PER_CHAR_SEC',
+      'TYPING_MAX_SEC', 'CHANNEL_WHITELIST', 'OPENROUTER_REFERER', 'OPENROUTER_TITLE'
+    ];
+    const SECRET_KEYS = new Set(['DISCORD_USER_TOKEN', 'AI_API_KEY']);
+    const STORAGE_KEY = 'discord_selfbot_config_v1';
+    const DEFAULT_MODELS = {
+      openrouter: 'meta-llama/llama-3.2-3b-instruct:free',
+      huggingface: 'meta-llama/Llama-3.3-70B-Instruct',
+      openai: 'gpt-4o-mini',
+      custom: '',
+    };
+
+    function toast(msg, type='success') {
+      const el = document.createElement('div');
+      el.className = `toast-msg ${type}`;
+      el.textContent = msg;
+      $('toast-container').appendChild(el);
+      setTimeout(() => el.remove(), 4000);
+    }
+
+    function escapeHtml(s) {
+      return String(s || '').replace(/[&<>"']/g, c => ({
+        '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+      }[c]));
+    }
+
+    // --- .env escaping (handle values with spaces, #, =, quotes, newlines) ---
+    function escapeEnvValue(v) {
+      if (v === null || v === undefined) return '';
+      v = String(v);
+      if (v === '') return '';
+      // Wrap in double quotes if value contains spaces, #, =, newlines, or quote chars
+      if (/[ #=\n\r"']/.test(v)) {
+        // Escape backslashes and double quotes
+        v = v.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        return `"${v}"`;
+      }
+      return v;
+    }
+
+    function buildEnvText(values) {
+      const lines = [
+        '# ============================================================',
+        '# Discord SELF-BOT Configuration',
+        '# Generated by the GitHub Pages configurator',
+        '# !! ToS WARNING: self-bots violate Discord ToS. Use a burner account.',
+        '# ============================================================',
+        '',
+        '# --- Discord user account token (NOT a bot application token) ---',
+        `DISCORD_USER_TOKEN=${escapeEnvValue(values.DISCORD_USER_TOKEN)}`,
+        '',
+        '# --- AI provider + key + model ---',
+        `AI_PROVIDER=${escapeEnvValue(values.AI_PROVIDER)}`,
+        `AI_API_KEY=${escapeEnvValue(values.AI_API_KEY)}`,
+        `AI_MODEL=${escapeEnvValue(values.AI_MODEL)}`,
+        `AI_BASE_URL=${escapeEnvValue(values.AI_BASE_URL)}`,
+        '',
+        '# --- Target user (bot responds to this user everywhere) ---',
+        `TARGET_USER_ID=${escapeEnvValue(values.TARGET_USER_ID)}`,
+        `STARTUP_MESSAGE=${escapeEnvValue(values.STARTUP_MESSAGE)}`,
+        '',
+        '# --- Personality & behavior ---',
+        `SYSTEM_PROMPT=${escapeEnvValue(values.SYSTEM_PROMPT)}`,
+        `MAX_HISTORY=${escapeEnvValue(values.MAX_HISTORY)}`,
+        `MAX_RESPONSE_CHARS=${escapeEnvValue(values.MAX_RESPONSE_CHARS)}`,
+        `TYPING_BASE_SEC=${escapeEnvValue(values.TYPING_BASE_SEC)}`,
+        `TYPING_PER_CHAR_SEC=${escapeEnvValue(values.TYPING_PER_CHAR_SEC)}`,
+        `TYPING_MAX_SEC=${escapeEnvValue(values.TYPING_MAX_SEC)}`,
+        '',
+        '# --- Advanced ---',
+        `CHANNEL_WHITELIST=${escapeEnvValue(values.CHANNEL_WHITELIST)}`,
+        `OPENROUTER_REFERER=${escapeEnvValue(values.OPENROUTER_REFERER)}`,
+        `OPENROUTER_TITLE=${escapeEnvValue(values.OPENROUTER_TITLE)}`,
+        '',
+      ];
+      return lines.join('\n');
+    }
+
+    // Simple .env parser (handles quoted values + comments)
+    function parseEnvText(text) {
+      const out = {};
+      const lines = text.split(/\r?\n/);
+      for (let line of lines) {
+        line = line.trim();
+        if (!line || line.startsWith('#')) continue;
+        const eq = line.indexOf('=');
+        if (eq < 0) continue;
+        const k = line.slice(0, eq).trim();
+        let v = line.slice(eq + 1).trim();
+        // Strip surrounding quotes
+        if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+          v = v.slice(1, -1);
+          // Unescape \\" and \\\\
+          v = v.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+        }
+        out[k] = v;
+      }
+      return out;
+    }
+
+    function getCurrentValues() {
+      const out = {};
+      for (const k of KEYS) {
+        const el = $(k);
+        if (el) out[k] = el.value;
+      }
+      return out;
+    }
+
+    function setField(k, v) {
+      const el = $(k);
+      if (el) el.value = v ?? '';
+    }
+
+    function saveToStorage() {
+      const values = getCurrentValues();
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(values));
+      $('save-status').textContent = 'saved ✓';
+      $('save-status').className = 'saved-indicator';
+      updateBadges();
+    }
+
+    function loadFromStorage() {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return null;
+      try { return JSON.parse(raw); } catch { return null; }
+    }
+
+    function applyValues(values) {
+      for (const k of KEYS) setField(k, values[k] ?? '');
+      updateBadges();
+    }
+
+    function updateBadges() {
+      for (const k of SECRET_KEYS) {
+        const v = $(k)?.value ?? '';
+        const badge = $(`badge-${k}`);
+        if (!badge) continue;
+        if (v) {
+          badge.className = 'badge badge-set';
+          badge.textContent = `set (...${v.slice(-4)})`;
+        } else {
+          badge.className = 'badge badge-missing';
+          badge.textContent = 'empty';
+        }
+      }
+    }
+
+    // --- Auto-save on every input change ---
+    function setupAutoSave() {
+      for (const k of KEYS) {
+        const el = $(k);
+        if (el) {
+          el.addEventListener('input', () => {
+            saveToStorage();
+          });
+        }
+      }
+    }
+
+    // --- Provider change -> suggest default model ---
+    $('AI_PROVIDER').addEventListener('change', () => {
+      const prov = $('AI_PROVIDER').value;
+      const def = DEFAULT_MODELS[prov] || '';
+      const modelEl = $('AI_MODEL');
+      const knownDefaults = Object.values(DEFAULT_MODELS);
+      if (!modelEl.value || knownDefaults.includes(modelEl.value)) {
+        modelEl.value = def;
+        saveToStorage();
+      }
+    });
+
+    // --- Password show/hide toggles ---
+    document.querySelectorAll('[data-toggle-pw]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-toggle-pw');
+        const input = $(id);
+        if (input.type === 'password') {
+          input.type = 'text';
+          btn.innerHTML = '<i class="bi bi-eye-slash"></i>';
+        } else {
+          input.type = 'password';
+          btn.innerHTML = '<i class="bi bi-eye"></i>';
+        }
+      });
+    });
+
+    // --- Actions: download / copy / upload / fill defaults / clear ---
+    $('btn-download').addEventListener('click', () => {
+      const text = buildEnvText(getCurrentValues());
+      const blob = new Blob([text], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = '.env';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast('.env downloaded');
+    });
+
+    $('btn-copy').addEventListener('click', async () => {
+      const text = buildEnvText(getCurrentValues());
+      try {
+        await navigator.clipboard.writeText(text);
+        toast('.env contents copied to clipboard');
+      } catch (e) {
+        // Fallback
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        toast('.env contents copied (fallback)');
+      }
+    });
+
+    $('btn-upload').addEventListener('click', () => $('file-input').click());
+    $('file-input').addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const parsed = parseEnvText(reader.result);
+        applyValues(parsed);
+        saveToStorage();
+        toast(`Loaded ${Object.keys(parsed).length} keys from ${file.name}`);
+      };
+      reader.onerror = () => toast('Failed to read file', 'error');
+      reader.readAsText(file);
+      e.target.value = ''; // allow re-uploading same file
+    });
+
+    $('btn-fill-defaults').addEventListener('click', () => {
+      const prov = $('AI_PROVIDER').value || 'openrouter';
+      const def = DEFAULT_MODELS[prov] || '';
+      if (!$('AI_MODEL').value || Object.values(DEFAULT_MODELS).includes($('AI_MODEL').value)) {
+        $('AI_MODEL').value = def;
+      }
+      if (!$('MAX_HISTORY').value) $('MAX_HISTORY').value = '10';
+      if (!$('MAX_RESPONSE_CHARS').value) $('MAX_RESPONSE_CHARS').value = '1900';
+      if (!$('TYPING_BASE_SEC').value) $('TYPING_BASE_SEC').value = '1.5';
+      if (!$('TYPING_PER_CHAR_SEC').value) $('TYPING_PER_CHAR_SEC').value = '0.012';
+      if (!$('TYPING_MAX_SEC').value) $('TYPING_MAX_SEC').value = '8.0';
+      if (!$('SYSTEM_PROMPT').value) $('SYSTEM_PROMPT').value =
+        'You are a helpful, concise AI assistant responding in a Discord chat.';
+      saveToStorage();
+      toast('Filled defaults (saved)');
+    });
+
+    $('btn-clear').addEventListener('click', () => {
+      if (!confirm('Clear all fields and delete localStorage? This cannot be undone.')) return;
+      for (const k of KEYS) setField(k, '');
+      localStorage.removeItem(STORAGE_KEY);
+      updateBadges();
+      $('save-status').textContent = 'cleared';
+      toast('All fields cleared', 'info');
+    });
+
+    // --- Initial load ---
+    const saved = loadFromStorage();
+    if (saved) {
+      applyValues(saved);
+      $('save-status').textContent = 'loaded from this browser';
+    }
+    updateBadges();
+    setupAutoSave();
+  </script>
+</body>
+</html>

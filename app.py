@@ -11,6 +11,8 @@ Production (gunicorn, single worker + threads for shared state):
 Endpoints:
     GET  /              -> dashboard UI
     GET  /api/status    -> JSON: bot state, uptime, config summary, recent logs
+    GET  /api/config    -> JSON: current .env values (secrets masked to 'set'/'unset')
+    POST /api/config    -> write form values to .env, then reload env vars
     POST /api/start     -> start the bot in a background thread (uses .env vars)
     POST /api/stop      -> gracefully stop the running bot
     POST /api/send      -> DM the TARGET_USER with given text
@@ -29,7 +31,7 @@ from collections import deque
 from datetime import datetime
 
 from flask import Flask, render_template, request, jsonify
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
 
 # ---------------------------------------------------------------------------
 # Flask app + shared state
@@ -200,6 +202,117 @@ def api_reload():
         return jsonify({"ok": False, "error": "Stop the bot before reloading config"}), 400
     load_dotenv(override=True)
     return jsonify({"ok": True, "msg": "Reloaded .env — start the bot to apply."})
+
+
+# ---------------------------------------------------------------------------
+# Configuration management — edit .env from the dashboard UI
+# ---------------------------------------------------------------------------
+# Keys the dashboard is allowed to read / write. Anything else in .env is left
+# alone (preserved on write).
+CONFIG_KEYS = [
+    "DISCORD_USER_TOKEN",
+    "AI_PROVIDER",
+    "AI_API_KEY",
+    "AI_MODEL",
+    "AI_BASE_URL",
+    "TARGET_USER_ID",
+    "STARTUP_MESSAGE",
+    "SYSTEM_PROMPT",
+    "MAX_HISTORY",
+    "MAX_RESPONSE_CHARS",
+    "TYPING_BASE_SEC",
+    "TYPING_PER_CHAR_SEC",
+    "TYPING_MAX_SEC",
+    "CHANNEL_WHITELIST",
+    "OPENROUTER_REFERER",
+    "OPENROUTER_TITLE",
+]
+# Keys whose values we never send back to the browser in plaintext.
+SECRET_KEYS = {"DISCORD_USER_TOKEN", "AI_API_KEY"}
+
+# Default AI model per provider (used by the dashboard for the "use default" hint).
+DEFAULT_MODELS = {
+    "openrouter": "meta-llama/llama-3.2-3b-instruct:free",
+    "huggingface": "meta-llama/Llama-3.3-70B-Instruct",
+    "openai": "gpt-4o-mini",
+    "custom": "",
+}
+
+
+@app.route("/api/config", methods=["GET"])
+def api_config_get():
+    """Return current .env values for all whitelisted keys.
+    Secrets come back as {set: bool, preview: 'last 4 chars'} only —
+    the actual token never leaves the server.
+    """
+    out = {}
+    for k in CONFIG_KEYS:
+        v = os.getenv(k, "")
+        if k in SECRET_KEYS:
+            out[k] = {"set": bool(v), "preview": (v[-4:] if v else "")}
+        else:
+            out[k] = v
+    return jsonify({
+        "ok": True,
+        "values": out,
+        "defaults": DEFAULT_MODELS,
+    })
+
+
+@app.route("/api/config", methods=["POST"])
+def api_config_save():
+    """Write JSON body values to .env.
+    For secret keys: an empty/missing value means 'leave unchanged'.
+    For other keys: an empty value clears the entry.
+    """
+    if state.running:
+        return jsonify({"ok": False,
+                        "error": "Stop the bot before editing config"}), 400
+
+    data = request.get_json(force=True, silent=True) or {}
+    env_path = os.path.join(os.getcwd(), ".env")
+
+    # Make sure .env exists so set_key has something to write to.
+    if not os.path.exists(env_path):
+        try:
+            with open(env_path, "w", encoding="utf-8") as f:
+                f.write("# Written by dashboard\n")
+        except Exception as e:
+            return jsonify({"ok": False,
+                            "error": f"Could not create .env: {e}"}), 500
+
+    written = []
+    skipped = []
+    for k in CONFIG_KEYS:
+        if k not in data:
+            continue
+        new_val = data[k]
+        if new_val is None:
+            new_val = ""
+        new_val = str(new_val)
+        # Secrets: empty value = 'leave unchanged'
+        if k in SECRET_KEYS and new_val == "":
+            existing = os.getenv(k, "")
+            if existing:
+                skipped.append(k)
+                continue
+            # else: fall through and write empty (still sets the key, value is empty)
+        try:
+            set_key(env_path, k, new_val, quote_mode="auto")
+            written.append(k)
+        except Exception as e:
+            return jsonify({"ok": False,
+                            "error": f"Failed to write {k}: {e}"}), 500
+
+    # Reload env vars in this running process so subsequent bot starts see the
+    # new values.
+    load_dotenv(override=True)
+
+    msg = f"Saved {len(written)} value(s)."
+    if skipped:
+        msg += f" Kept existing: {', '.join(skipped)}."
+    msg += " Click 'Start Bot' to apply."
+    return jsonify({"ok": True, "msg": msg, "written": written, "skipped": skipped})
 
 
 # ---------------------------------------------------------------------------

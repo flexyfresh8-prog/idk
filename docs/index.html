@@ -53,14 +53,42 @@
       <span class="badge bg-secondary"><i class="bi bi-github"></i> GitHub Pages</span>
     </div>
 
+    <!-- =========== DEPLOY BAR (most prominent) =========== -->
+    <div class="card border-primary" style="border-width: 2px;">
+      <div class="card-header bg-primary text-white">
+        <i class="bi bi-rocket-takeoff"></i> Run this bot in your browser — no Python install required
+      </div>
+      <div class="card-body">
+        <p class="mb-3">
+          <strong>Discord's API blocks direct browser access (CORS),</strong> so a self-bot must run somewhere with a real server.
+          Click either button below — it deploys the bot to a free cloud host that gives you a working dashboard URL you can open in any browser.
+          No local Python, no command line.
+        </p>
+        <div class="d-flex flex-wrap gap-3">
+          <a href="https://render.com/deploy?repo=https://github.com/flexyfresh8-prog/idk"
+             target="_blank" class="btn btn-primary btn-lg flex-grow-1" style="min-width: 280px;">
+            <i class="bi bi-box-arrow-up-right"></i> Deploy to Render (free, 1-click)
+          </a>
+          <a href="https://github.com/codespaces/new?hide_repo_select=true&ref=main&repo=flexyfresh8-prog/idk"
+             target="_blank" class="btn btn-secondary btn-lg flex-grow-1" style="min-width: 280px;">
+            <i class="bi bi-terminal"></i> Open in GitHub Codespaces (free, browser-based)
+          </a>
+        </div>
+        <p class="small text-muted mt-3 mb-0">
+          <i class="bi bi-info-circle"></i>
+          <strong>Render</strong>: easiest — sign in with GitHub, click Apply, set 3 secret env vars in their UI, deploy.
+          Free tier spins down after 15 min idle (kills bot). For 24/7 upgrade to $7/mo.
+          <br>
+          <strong>Codespaces</strong>: gives you a real terminal in the browser (60 free hours/month).
+          Run <code>pip install -r requirements.txt && python app.py</code>, port 5000 auto-forwards.
+        </p>
+      </div>
+    </div>
+
     <div class="hero">
       <h2><i class="bi bi-info-circle text-info"></i> What this page is (and isn't)</h2>
       <p class="mb-2"><strong>This is a static configuration form.</strong> It runs entirely in your browser — nothing is sent to any server. Your settings are saved in <code>localStorage</code> on this device only.</p>
-      <p class="mb-2"><strong>It is NOT a live bot dashboard.</strong> To actually run the Discord bot, you still need to either:</p>
-      <ul>
-        <li>Run <code>python app.py</code> locally with the downloaded <code>.env</code> file, OR</li>
-        <li>Deploy the Flask dashboard to a free always-on host (Fly.io recommended — see Deploy section below)</li>
-      </ul>
+      <p class="mb-2"><strong>It is NOT a live bot dashboard.</strong> Use it to generate a <code>.env</code> file you can paste into Render's UI (recommended), or download and use with the local/Codespaces setup.</p>
       <p class="mb-0 text-warning"><i class="bi bi-exclamation-triangle"></i> Self-bots violate Discord's ToS — use a burner account. See <a href="https://github.com/flexyfresh8-prog/idk#readme" target="_blank">the README</a>.</p>
     </div>
 

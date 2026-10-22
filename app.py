@@ -645,7 +645,7 @@ def api_config_save():
     data = request.get_json(force=True, silent=True) or {}
     env_path = os.path.join(os.getcwd(), ".env")
 
-    # Make sure .env exists so set_key has something to write to.
+    # Make sure .env exists.
     if not os.path.exists(env_path):
         try:
             with open(env_path, "w", encoding="utf-8") as f:
@@ -671,7 +671,7 @@ def api_config_save():
                 continue
             # else: fall through and write empty (still sets the key, value is empty)
         try:
-            set_key(env_path, k, new_val, quote_mode="auto")
+            _set_env_value_raw(env_path, k, new_val)
             written.append(k)
         except Exception as e:
             return jsonify({"ok": False,
@@ -686,6 +686,48 @@ def api_config_save():
         msg += f" Kept existing: {', '.join(skipped)}."
     msg += " Click 'Start Bot' to apply."
     return jsonify({"ok": True, "msg": msg, "written": written, "skipped": skipped})
+
+
+def _set_env_value_raw(env_path: str, key: str, value: str) -> None:
+    """Write a key=value line to .env WITHOUT adding quotes.
+
+    Replaces python-dotenv's set_key() because that function (even with
+    quote_mode='auto') wraps values in double quotes in various cases —
+    and discord.py-self rejects tokens with quote chars at the start/end
+    with 'LoginFailure: Improper token has been passed'.
+
+    This writer:
+      - Preserves comments and ordering of the existing .env
+      - Updates the line in-place if the key exists
+      - Appends a new line if the key doesn't exist
+      - Never adds quotes, escapes, or backslashes
+    """
+    # Read existing lines
+    lines = []
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            lines = f.read().splitlines()
+
+    # Find the key and replace its line, or append.
+    new_line = f"{key}={value}"
+    found = False
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        existing_key = stripped.partition("=")[0].strip()
+        if existing_key == key:
+            lines[i] = new_line
+            found = True
+            break
+    if not found:
+        lines.append(new_line)
+
+    # Atomic write: write to a temp file then rename.
+    tmp_path = env_path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    os.replace(tmp_path, env_path)
 
 
 # ---------------------------------------------------------------------------

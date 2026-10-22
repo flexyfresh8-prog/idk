@@ -207,31 +207,66 @@ def _bot_thread_main() -> None:
     async def _heartbeat_watchdog() -> None:
         grace = float(os.getenv("BOT_HEARTBEAT_GRACE_SEC", "90"))
         poll_every = float(os.getenv("BOT_HEARTBEAT_POLL_SEC", "30"))
-        consecutive_stale = 0
+        startup_timeout = float(os.getenv("BOT_STARTUP_TIMEOUT_SEC", "120"))
+        last_good_latency = time.time()   # when we last saw a small, real latency
+        startup_at = time.time()
+        reported_startup = False
         while True:
             await asyncio.sleep(poll_every)
             if state.bot is None or state.bot.is_closed():
                 return
-            try:
-                lat = state.bot.latency
-            except Exception:
-                continue
-            # bot.latency can be inf or NaN before the first heartbeat ACK.
-            if lat != lat or lat == float("inf"):
-                continue
-            if lat > grace:
-                consecutive_stale += 1
-                log.warning("Heartbeat stale (%.1fs, %d in a row) — "
-                            "forcing reconnect.", lat, consecutive_stale)
-                if consecutive_stale >= 2:
-                    log.error("Heartbeat stale for too long — forcing bot.close().")
+            # Startup timeout: if the bot hasn't reached is_ready() within
+            # startup_timeout seconds, the WS is stuck — force close so the
+            # supervisor can restart us.
+            if not state.bot.is_ready():
+                if time.time() - startup_at > startup_timeout:
+                    log.error("Bot failed to reach READY state within %.0fs — "
+                              "forcing close so supervisor can restart.",
+                              startup_timeout)
                     try:
                         await state.bot.close()
                     except Exception as e:
                         log.error("bot.close() failed: %s", e)
                     return
+                if not reported_startup:
+                    log.warning("Bot still not READY after %.0fs — "
+                                "watchdog is watching.",
+                                time.time() - startup_at)
+                    reported_startup = True
+                continue
+            # Once ready, watch bot.latency. In discord.py-self, latency is
+            # time.monotonic() - last_heartbeat_ack_time, so it GROWS when no
+            # new ACK arrives. If it returns inf, the WS is gone entirely.
+            try:
+                lat = state.bot.latency
+            except Exception:
+                continue
+            # NaN (lat != lat) — never had a heartbeat; treat as stale.
+            # inf — WS is gone; treat as stale.
+            if lat != lat or lat == float("inf"):
+                stale_for = time.time() - last_good_latency
+                if stale_for > grace:
+                    log.error("Bot latency is inf/NaN for %.0fs — "
+                              "forcing close.", stale_for)
+                    try:
+                        await state.bot.close()
+                    except Exception as e:
+                        log.error("bot.close() failed: %s", e)
+                    return
+                continue
+            # Real latency number — if small, the bot is healthy.
+            if lat < grace:
+                last_good_latency = time.time()
             else:
-                consecutive_stale = 0
+                stale_for = time.time() - last_good_latency
+                if stale_for > grace:
+                    log.error("Bot heartbeat stale for %.0fs (latency=%.1fs) — "
+                              "forcing close.", stale_for, lat)
+                    try:
+                        await state.bot.close()
+                    except Exception as e:
+                        log.error("bot.close() failed: %s", e)
+                    return
 
     started_at = time.time()
     try:

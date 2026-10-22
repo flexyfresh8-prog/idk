@@ -25,10 +25,12 @@ Usage:
 """
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
 import time
+import urllib.request
 from pathlib import Path
 
 from instancelock import SingleInstanceLock
@@ -48,6 +50,14 @@ RESTART_DELAY = float(os.getenv("SUPERVISOR_RESTART_DELAY", "10"))
 RESTART_DELAY_MAX = float(os.getenv("SUPERVISOR_RESTART_DELAY_MAX", "120"))
 # An app that lasted this long is considered healthy - the backoff resets.
 HEALTHY_AFTER = float(os.getenv("SUPERVISOR_HEALTHY_AFTER", "120"))
+# How often to poll the app's /api/health endpoint while it is running.
+HEALTH_POLL_SEC = float(os.getenv("SUPERVISOR_HEALTH_POLL_SEC", "60"))
+# If the bot's heartbeat is stale for this many seconds, kill the app.
+HEALTH_STALE_GRACE = float(os.getenv("SUPERVISOR_HEALTH_STALE_GRACE", "180"))
+# Number of consecutive stale polls before killing (safety against false positives).
+HEALTH_STALE_THRESHOLD = int(os.getenv("SUPERVISOR_HEALTH_STALE_THRESHOLD", "2"))
+# Port the app listens on.
+APP_PORT = int(os.getenv("PORT", "5000"))
 
 
 def _log(message: str) -> None:
@@ -110,6 +120,18 @@ def app_is_running() -> bool:
     return True
 
 
+def _poll_app_health() -> dict | None:
+    """Hit the app's /api/health endpoint. Returns the JSON dict, or None on failure."""
+    try:
+        url = f"http://127.0.0.1:{APP_PORT}/api/health"
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read().decode("utf-8", errors="ignore"))
+    except Exception as e:  # noqa: BLE001
+        _log(f"Health poll failed: {type(e).__name__}: {e}")
+        return None
+
+
 def main() -> int:
     lock = SingleInstanceLock(str(SUPERVISOR_LOCK))
     if not lock.acquire():
@@ -151,21 +173,88 @@ def main() -> int:
                 stdout=crash_log,
                 stderr=subprocess.STDOUT,
             )
-            code = proc.wait()
-            crash_log.close()
         except Exception as e:  # noqa: BLE001
             _log(f"Could not start app.py: {e}")
             time.sleep(delay)
             delay = min(RESTART_DELAY_MAX, delay * 2)
             continue
 
-        uptime = time.time() - started
-        _log(f"app.py exited with code {code} after {uptime:.0f}s.")
+        # ---- Watch the running app: poll health every HEALTH_POLL_SEC ----
+        # We don't just block on proc.wait() because a stuck-but-alive
+        # bot (process alive, asyncio loop frozen, gateway dead) needs an
+        # out-of-process watchdog to kill it. The in-process watchdog in
+        # app.py handles most cases, but this one is a backup for when the
+        # loop itself is wedged.
+        stale_streak = 0
+        next_poll = time.time() + HEALTH_POLL_SEC
+        while True:
+            # Did the process exit on its own?
+            rc = proc.poll()
+            if rc is not None:
+                crash_log.close()
+                uptime = time.time() - started
+                _log(f"app.py exited with code {rc} after {uptime:.0f}s.")
+                if uptime >= HEALTHY_AFTER:
+                    delay = RESTART_DELAY
+                else:
+                    delay = min(RESTART_DELAY_MAX, delay * 2)
+                break
 
-        if uptime >= HEALTHY_AFTER:
-            delay = RESTART_DELAY
-        else:
-            delay = min(RESTART_DELAY_MAX, delay * 2)
+            # Time for a health poll?
+            now = time.time()
+            if now < next_poll:
+                time.sleep(min(5.0, max(0.5, next_poll - now)))
+                continue
+            next_poll = now + HEALTH_POLL_SEC
+
+            health = _poll_app_health()
+            if health is None:
+                # /api/health didn't respond — process might still be
+                # booting Flask, or the loop is stuck. Don't kill yet;
+                # let proc.poll() catch a real crash.
+                stale_streak = 0
+                continue
+
+            bot_ready = health.get("bot_ready", False)
+            bot_latency = health.get("bot_latency")
+            running = health.get("running", False)
+
+            if not running or not bot_ready:
+                # Either the bot hasn't started yet, or it just crashed
+                # internally. Reset stale streak — app.py's in-process
+                # watchdog will handle this.
+                stale_streak = 0
+                continue
+
+            # If latency is None (no heartbeat yet) or > grace, count it
+            # as stale.
+            is_stale = (bot_latency is None) or (bot_latency > HEALTH_STALE_GRACE)
+            if is_stale:
+                stale_streak += 1
+                _log(f"Bot heartbeat stale (latency={bot_latency}, "
+                     f"stale_streak={stale_streak}/{HEALTH_STALE_THRESHOLD}).")
+                if stale_streak >= HEALTH_STALE_THRESHOLD:
+                    _log("Killing app.py — bot is alive-but-stuck.")
+                    try:
+                        proc.terminate()
+                        proc.wait(timeout=10)
+                    except Exception:
+                        try:
+                            proc.kill()
+                        except Exception:
+                            pass
+                    crash_log.close()
+                    uptime = time.time() - started
+                    _log(f"app.py killed after {uptime:.0f}s (was stuck).")
+                    if uptime >= HEALTHY_AFTER:
+                        delay = RESTART_DELAY
+                    else:
+                        delay = min(RESTART_DELAY_MAX, delay * 2)
+                    break
+            else:
+                if stale_streak > 0:
+                    _log(f"Bot heartbeat recovered (latency={bot_latency}).")
+                stale_streak = 0
 
         _log(f"Restarting app.py in {delay:.0f}s.")
         time.sleep(delay)

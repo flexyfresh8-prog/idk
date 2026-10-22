@@ -1493,8 +1493,9 @@ def engagement_gate(message: discord.Message, text: str) -> Tuple[bool, str]:
     # them, unless they're explicitly replying to a 3rd party in a busy
     # channel (which would feel like an interruption).
     if is_target_user(message.author) and not _replies_to_someone_else(message):
-        if rate_limited():
-            return "react", "target-cooldown"
+        # Target user bypasses the per-minute rate limit too. Without this
+        # an active conversation (target sends 7+ messages in 60s) would
+        # suddenly go silent — that looks broken to the user.
         return "reply", "target_user"
 
     # Always answer a direct question of the target in a DM.
@@ -1748,6 +1749,8 @@ async def _process_pending(channel_id: int) -> None:
         return
 
     action, reason = engagement_gate(message, combined)
+    log.info("engagement_gate: action=%s reason=%s (channel=%s, author=%s)",
+             action, reason, channel_id, message.author.display_name)
 
     if action == "react":
         log.info("Not replying in channel %s (%s) — reacting instead", channel_id, reason)
@@ -1810,7 +1813,19 @@ async def on_message(message: discord.Message):
         await bot.process_commands(message)
         return  # never AI-respond to our own messages
 
+    # Log every message we see, so the dashboard shows what's happening
+    # even when the bot decides not to reply. This is critical for
+    # debugging "doesn't talk by itself" issues.
+    try:
+        chan = message.channel.name if hasattr(message.channel, "name") else "DM"
+        log.info("on_message: author=%s (id=%s) channel=%s (id=%s) is_target=%s content=%r",
+                 message.author.display_name, message.author.id, chan, message.channel.id,
+                 is_target_user(message.author), message.content[:80])
+    except Exception:
+        pass
+
     if not should_respond(message):
+        log.info("  -> not responding (should_respond=False)")
         return
 
     # Remember who we are talking to. If TARGET_USER_ID was ever set to

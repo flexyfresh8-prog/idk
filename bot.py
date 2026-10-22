@@ -87,7 +87,14 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # ---------------------------------------------------------------------------
 load_dotenv()
 
-DISCORD_USER_TOKEN = os.getenv("DISCORD_USER_TOKEN", "")
+# Strip whitespace AND any wrapping quotes that python-dotenv's set_key
+# (used by the dashboard's /api/config endpoint) may have added. A token
+# saved as `DISCORD_USER_TOKEN="abc123"` would otherwise be sent to
+# Discord WITH the quote chars, causing "Improper token has been passed".
+_raw_token = os.getenv("DISCORD_USER_TOKEN", "").strip()
+while _raw_token and _raw_token[0] in "\"'" and _raw_token[-1] == _raw_token[0]:
+    _raw_token = _raw_token[1:-1].strip()
+DISCORD_USER_TOKEN = _raw_token
 # NOTE: This must be a USER ACCOUNT token (extracted from the Discord client),
 # NOT a bot application token from the Developer Portal. Using a bot token here
 # will fail to connect. See README for how to extract your user token.
@@ -1945,6 +1952,25 @@ def main():
     if not AI_API_KEY:
         log.warning("AI_API_KEY is not set — AI calls will likely fail. "
                     "Get a key from your provider (OpenRouter / Hugging Face / OpenAI).")
+
+    # Diagnostic: show what token we're actually using (first 6 + last 4).
+    # This catches two failure modes:
+    #   1. The dashboard's set_key wrapped it in quotes -> the value has
+    #      quote chars at the start/end that Discord rejects.
+    #   2. The user pasted a bot application token (starts with MTk/MTU -
+    #      those are base64 of a snowflake ID; user tokens don't).
+    _preview = f"{DISCORD_USER_TOKEN[:6]}...{DISCORD_USER_TOKEN[-4:]}" if len(DISCORD_USER_TOKEN) > 10 else "?"
+    _starts_quoted = DISCORD_USER_TOKEN.startswith(('"', "'"))
+    _looks_like_bot_token = DISCORD_USER_TOKEN[:3] in ("MTk", "MTU")
+    log.info("Token preview: %s (len=%d, quoted=%s, looks_like_bot_token=%s)",
+             _preview, len(DISCORD_USER_TOKEN), _starts_quoted, _looks_like_bot_token)
+    if _starts_quoted:
+        log.error("TOKEN STILL HAS QUOTES — fix your .env manually: "
+                  "DISCORD_USER_TOKEN=<raw_token_no_quotes>")
+    if _looks_like_bot_token:
+        log.error("TOKEN LOOKS LIKE A BOT APPLICATION TOKEN — that won't work with "
+                  "discord.py-self. You need a USER ACCOUNT token extracted from "
+                  "the Discord web client (DevTools -> Network -> Authorization header).")
 
     # One account, one connection. Two bots on the same user account is the
     # fastest way to get it banned, so a second instance refuses to start.

@@ -5,7 +5,7 @@ services:
     name: discord-ai-selfbot
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn -w 1 --threads 4 -t 120 --bind 0.0.0.0:$PORT app:app --access-logfile -
+    startCommand: gunicorn -w 1 --threads 4 -t 120 --bind 0.0.0.0:$PORT -c gunicorn.conf.py app:app --access-logfile -
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.6"
@@ -17,17 +17,38 @@ services:
       - key: TARGET_USER_ID
         sync: false
       # Non-secret defaults
+      - key: AUTO_START
+        value: "1"
+      - key: AUTO_RESTART
+        value: "1"
       - key: AI_PROVIDER
         value: openrouter
       - key: AI_MODEL
         value: meta-llama/llama-3.2-3b-instruct:free
       - key: STARTUP_MESSAGE
         value: ""
+      # Empty SYSTEM_PROMPT = built-in 15yo-girl persona (2026 slang)
       - key: SYSTEM_PROMPT
-        value: "You are a helpful, concise AI assistant responding in a Discord chat."
+        value: ""
       - key: MAX_HISTORY
         value: "10"
+      - key: THINK_BASE_SEC
+        value: "2.0"
+      - key: THINK_MAX_SEC
+        value: "6.0"
       - key: TYPING_BASE_SEC
-        value: "1.5"
+        value: "3.0"
+      - key: TYPING_PER_CHAR_SEC
+        value: "0.05"
       - key: TYPING_MAX_SEC
-        value: "8.0"
+        value: "45.0"
+      - key: JITTER_SEC
+        value: "2.0"
+      - key: SPLIT_MESSAGES
+        value: "1"
+      - key: TEEN_STYLE
+        value: "1"
+      - key: EMOJI_CHANCE
+        value: "0.25"
+      - key: AI_TEMPERATURE
+        value: "0.9"

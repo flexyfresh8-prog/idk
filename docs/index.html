@@ -203,7 +203,40 @@
         <div class="row g-3 mb-4">
           <div class="col-12">
             <label class="form-label">System Prompt</label>
-            <textarea id="SYSTEM_PROMPT" class="form-control" rows="3" placeholder="You are a helpful, concise AI assistant..."></textarea>
+            <textarea id="SYSTEM_PROMPT" class="form-control" rows="3" placeholder="Leave empty to use the built-in 15yo-girl persona..."></textarea>
+            <div class="form-text">Leave empty for the built-in persona — a 15 year old girl who texts in 2026 slang (rizz, delulu, ate, it's giving, no cap...). Set your own to override the voice.</div>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Teen style</label>
+            <select id="TEEN_STYLE" class="form-select">
+              <option value="1">on — lowercase texting voice</option>
+              <option value="0">off — leave the reply as-is</option>
+            </select>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Split long replies</label>
+            <select id="SPLIT_MESSAGES" class="form-select">
+              <option value="1">on — send as 2 messages</option>
+              <option value="0">off — one message</option>
+            </select>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Emoji chance</label>
+            <input type="number" step="0.05" id="EMOJI_CHANCE" class="form-control" min="0" max="1" value="0.2">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">AI temperature</label>
+            <input type="number" step="0.05" id="AI_TEMPERATURE" class="form-control" min="0" max="2" value="0.9">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Reaction chance</label>
+            <input type="number" step="0.05" id="REACTION_CHANCE" class="form-control" min="0" max="1" value="0.3">
+            <div class="form-text">Chance of a quick reaction before the reply ("no way", "stoppp").</div>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Typo chance</label>
+            <input type="number" step="0.02" id="TYPO_CHANCE" class="form-control" min="0" max="1" value="0.12">
+            <div class="form-text">Chance a reply has one human typo in it.</div>
           </div>
         </div>
 
@@ -220,17 +253,37 @@
             <label class="form-label">Max reply chars</label>
             <input type="number" id="MAX_RESPONSE_CHARS" class="form-control" min="100" max="1900" value="1900">
           </div>
-          <div class="col-md-2">
+        </div>
+
+        <hr class="border-secondary">
+
+        <!-- PACING -->
+        <h6 class="text-uppercase text-muted mb-3"><i class="bi bi-hourglass-split"></i> Response pacing</h6>
+        <div class="form-text mb-2">The bot reads the message, thinks, then types it out. Raise these to make it slower.</div>
+        <div class="row g-3 mb-4">
+          <div class="col-md-4">
+            <label class="form-label">Think min (s)</label>
+            <input type="number" step="0.1" id="THINK_BASE_SEC" class="form-control" min="0" max="60" value="2.0">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Think max (s)</label>
+            <input type="number" step="0.1" id="THINK_MAX_SEC" class="form-control" min="0" max="60" value="6.0">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Jitter (s)</label>
+            <input type="number" step="0.1" id="JITTER_SEC" class="form-control" min="0" max="30" value="2.0">
+          </div>
+          <div class="col-md-4">
             <label class="form-label">Typing min (s)</label>
-            <input type="number" step="0.1" id="TYPING_BASE_SEC" class="form-control" min="0" max="60" value="1.5">
+            <input type="number" step="0.1" id="TYPING_BASE_SEC" class="form-control" min="0" max="60" value="3.0">
           </div>
-          <div class="col-md-2">
+          <div class="col-md-4">
             <label class="form-label">Typing per-char (s)</label>
-            <input type="number" step="0.001" id="TYPING_PER_CHAR_SEC" class="form-control" min="0" max="1" value="0.012">
+            <input type="number" step="0.001" id="TYPING_PER_CHAR_SEC" class="form-control" min="0" max="1" value="0.05">
           </div>
-          <div class="col-md-2">
+          <div class="col-md-4">
             <label class="form-label">Typing max (s)</label>
-            <input type="number" step="0.1" id="TYPING_MAX_SEC" class="form-control" min="0" max="60" value="8.0">
+            <input type="number" step="0.1" id="TYPING_MAX_SEC" class="form-control" min="0" max="120" value="45.0">
           </div>
         </div>
 
@@ -323,8 +376,11 @@ python app.py</pre>
     const KEYS = [
       'DISCORD_USER_TOKEN', 'AI_PROVIDER', 'AI_API_KEY', 'AI_MODEL', 'AI_BASE_URL',
       'TARGET_USER_ID', 'STARTUP_MESSAGE', 'SYSTEM_PROMPT', 'MAX_HISTORY',
-      'MAX_RESPONSE_CHARS', 'TYPING_BASE_SEC', 'TYPING_PER_CHAR_SEC',
-      'TYPING_MAX_SEC', 'CHANNEL_WHITELIST', 'OPENROUTER_REFERER', 'OPENROUTER_TITLE'
+      'MAX_RESPONSE_CHARS', 'THINK_BASE_SEC', 'THINK_MAX_SEC', 'JITTER_SEC',
+      'TYPING_BASE_SEC', 'TYPING_PER_CHAR_SEC', 'TYPING_MAX_SEC',
+      'SPLIT_MESSAGES', 'TEEN_STYLE', 'EMOJI_CHANCE', 'AI_TEMPERATURE',
+      'REACTION_CHANCE', 'TYPO_CHANCE',
+      'CHANNEL_WHITELIST', 'OPENROUTER_REFERER', 'OPENROUTER_TITLE'
     ];
     const SECRET_KEYS = new Set(['DISCORD_USER_TOKEN', 'AI_API_KEY']);
     const STORAGE_KEY = 'discord_selfbot_config_v1';
@@ -385,12 +441,26 @@ python app.py</pre>
         `STARTUP_MESSAGE=${escapeEnvValue(values.STARTUP_MESSAGE)}`,
         '',
         '# --- Personality & behavior ---',
+        '# SYSTEM_PROMPT empty = built-in 15yo-girl persona',
         `SYSTEM_PROMPT=${escapeEnvValue(values.SYSTEM_PROMPT)}`,
         `MAX_HISTORY=${escapeEnvValue(values.MAX_HISTORY)}`,
         `MAX_RESPONSE_CHARS=${escapeEnvValue(values.MAX_RESPONSE_CHARS)}`,
+        '',
+        '# --- Response pacing (seconds) ---',
+        `THINK_BASE_SEC=${escapeEnvValue(values.THINK_BASE_SEC)}`,
+        `THINK_MAX_SEC=${escapeEnvValue(values.THINK_MAX_SEC)}`,
+        `JITTER_SEC=${escapeEnvValue(values.JITTER_SEC)}`,
         `TYPING_BASE_SEC=${escapeEnvValue(values.TYPING_BASE_SEC)}`,
         `TYPING_PER_CHAR_SEC=${escapeEnvValue(values.TYPING_PER_CHAR_SEC)}`,
         `TYPING_MAX_SEC=${escapeEnvValue(values.TYPING_MAX_SEC)}`,
+        '',
+        '# --- Voice ---',
+        `SPLIT_MESSAGES=${escapeEnvValue(values.SPLIT_MESSAGES)}`,
+        `TEEN_STYLE=${escapeEnvValue(values.TEEN_STYLE)}`,
+        `EMOJI_CHANCE=${escapeEnvValue(values.EMOJI_CHANCE)}`,
+        `REACTION_CHANCE=${escapeEnvValue(values.REACTION_CHANCE)}`,
+        `TYPO_CHANCE=${escapeEnvValue(values.TYPO_CHANCE)}`,
+        `AI_TEMPERATURE=${escapeEnvValue(values.AI_TEMPERATURE)}`,
         '',
         '# --- Advanced ---',
         `CHANNEL_WHITELIST=${escapeEnvValue(values.CHANNEL_WHITELIST)}`,
@@ -566,11 +636,19 @@ python app.py</pre>
       }
       if (!$('MAX_HISTORY').value) $('MAX_HISTORY').value = '10';
       if (!$('MAX_RESPONSE_CHARS').value) $('MAX_RESPONSE_CHARS').value = '1900';
-      if (!$('TYPING_BASE_SEC').value) $('TYPING_BASE_SEC').value = '1.5';
-      if (!$('TYPING_PER_CHAR_SEC').value) $('TYPING_PER_CHAR_SEC').value = '0.012';
-      if (!$('TYPING_MAX_SEC').value) $('TYPING_MAX_SEC').value = '8.0';
-      if (!$('SYSTEM_PROMPT').value) $('SYSTEM_PROMPT').value =
-        'You are a helpful, concise AI assistant responding in a Discord chat.';
+      if (!$('THINK_BASE_SEC').value) $('THINK_BASE_SEC').value = '2.0';
+      if (!$('THINK_MAX_SEC').value) $('THINK_MAX_SEC').value = '6.0';
+      if (!$('JITTER_SEC').value) $('JITTER_SEC').value = '2.0';
+      if (!$('TYPING_BASE_SEC').value) $('TYPING_BASE_SEC').value = '3.0';
+      if (!$('TYPING_PER_CHAR_SEC').value) $('TYPING_PER_CHAR_SEC').value = '0.05';
+      if (!$('TYPING_MAX_SEC').value) $('TYPING_MAX_SEC').value = '45.0';
+      if (!$('EMOJI_CHANCE').value) $('EMOJI_CHANCE').value = '0.2';
+      if (!$('AI_TEMPERATURE').value) $('AI_TEMPERATURE').value = '0.9';
+      if (!$('REACTION_CHANCE').value) $('REACTION_CHANCE').value = '0.3';
+      if (!$('TYPO_CHANCE').value) $('TYPO_CHANCE').value = '0.12';
+      if (!$('SPLIT_MESSAGES').value) $('SPLIT_MESSAGES').value = '1';
+      if (!$('TEEN_STYLE').value) $('TEEN_STYLE').value = '1';
+      // SYSTEM_PROMPT stays empty — empty means "use the built-in persona".
       saveToStorage();
       toast('Filled defaults (saved)');
     });

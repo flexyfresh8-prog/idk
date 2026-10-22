@@ -1,0 +1,2 @@
+meta-llama/Llama-3.3-70B-Instruct = The remote name could not be resolved: 'api-inference.huggingface.co'
+Qwen/Qwen2.5-7B-Instruct = The remote name could not be resolved: 'api-inference.huggingface.co'

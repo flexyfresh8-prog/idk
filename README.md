@@ -19,6 +19,11 @@ Compared to the standalone `bot.py`, this version includes a Flask web app (`app
 - 📨 **Send DM form** — DM the `TARGET_USER` directly from the dashboard
 - ♻️ **Reload .env button** — edit config without restarting the web server
 - 🚀 **Deploy anywhere** — Dockerfile, Procfile, render.yaml, fly.toml included
+- 🗣️ **A voice** — replies as a 15 year old girl texting in 2026 slang (lowercase, short, current Gen Z / Gen Alpha vocabulary). Override with `SYSTEM_PROMPT`
+- ⏱️ **A human pace** — reads the message, thinks, then types it out. Long replies go out as two messages
+- 🫠 **Human tells, not bot tells** — a quick reaction before the reply, the occasional typo, no markdown, no "let me know if you need anything", and never a question at the end of every sentence
+- 🎲 **It doesn't answer everything** — the bot decides whether to reply, react only, or stay silent, and it goes quiet in long bursts
+- 🔁 **Two free tiers, one bot** — OpenRouter primary, Hugging Face as automatic failover, so a rate limit moves the load instead of going silent
 
 ## Quick Start (local)
 
@@ -116,6 +121,25 @@ The Flask process and the Discord bot live in the same OS process — Flask hand
    ```
 5. Or create a systemd service for auto-restart on boot
 
+### Option E — Windows Auto-Start on Boot
+
+**Method 1: Task Scheduler (Recommended)**
+1. Right-click `setup-startup.bat` → Run as Administrator
+2. The bot will automatically start when you log in to Windows
+3. To test immediately: `schtasks /run /tn "Discord Bot"`
+4. To remove: `schtasks /delete /tn "Discord Bot" /f`
+
+**Method 2: Startup Folder (Simpler)**
+1. Run `add-to-startup.bat` (no admin rights needed)
+2. The bot will start when you log in
+3. To remove: Delete `Discord-Bot-startup.bat` from `shell:startup`
+
+**Method 3: Manual Startup Folder**
+1. Copy `startup-hidden.bat` to your Startup folder:
+   - Press Win+R, type `shell:startup`, press Enter
+   - Copy `startup-hidden.bat` to that folder
+2. Bot will start on next login
+
 ## Configuration
 
 All settings live in `.env`. See `.env.example` for the full list. Key ones:
@@ -125,9 +149,101 @@ All settings live in `.env`. See `.env.example` for the full list. Key ones:
 | `DISCORD_USER_TOKEN` | **Required.** User account token (extract via Discord web client DevTools) |
 | `AI_PROVIDER` | `openrouter` / `huggingface` / `openai` |
 | `AI_API_KEY` | API key from your AI provider |
-| `AI_MODEL` | Model name (e.g. `meta-llama/llama-3.2-3b-instruct:free`) |
+| `HUGGINGFACE_TOKEN` | Optional **second free tier** — HF token used as failover when the primary provider is rate-limited |
+| `FALLBACK_MODELS` | Comma-separated models tried on the same provider, in order |
+| `HF_FALLBACK_MODELS` | Comma-separated models tried on the Hugging Face router |
+| `AI_MODEL` | Model name (e.g. `poolside/laguna-s-2.1:free`) |
 | `TARGET_USER_ID` | Discord user ID — bot will respond to this user in any channel |
 | `STARTUP_MESSAGE` | Optional one-time DM to target user on bot startup |
+| `SYSTEM_PROMPT` | Leave empty to use the built-in persona (a 15 year old girl texting in 2026 slang). Set it to override the voice. |
+| `THINK_BASE_SEC` / `THINK_MAX_SEC` / `THINK_TAIL_SEC` | How long the bot "reads" a message before it starts typing (incl. a long tail, sometimes minutes of silence) |
+| `TYPING_BASE_SEC` / `TYPING_PER_CHAR_SEC` / `TYPING_MAX_SEC` | How long the typing indicator stays up, scaled to reply length |
+| `JITTER_SEC` | Random variance so no two replies take the same amount of time |
+| `TEEN_STYLE` | `1` = rewrite replies into teen texting style (lowercase, no apostrophes) |
+| `SPLIT_MESSAGES` | `1` = send long replies as two messages, like a person |
+| `EMOJI_CHANCE` | `0`–`1` chance of adding a reaction emoji to a reply |
+| `REACTION_CHANCE` | `0`–`1` chance of a quick reaction *before* the reply ("no way", "stoppp") |
+| `TYPO_CHANCE` | `0`–`1` chance that a reply has one human typo in it |
+| `AI_TEMPERATURE` | Higher = chattier and more slangy |
+| `REPLY_CHANCE` | `0`–`1` chance of answering an eligible message. The single most important knob — a bot that answers everything is a bot |
+| `REACT_ONLY_CHANCE` | When it doesn't reply, chance it drops an emoji reaction instead of staying dead silent |
+| `USE_REACTIONS` | `1` = use real Discord reactions |
+| `FOLLOWUP_CHANCE` | `0`–`1` chance of a short second message after the real one |
+| `TYPING_PAUSE_CHANCE` | `0`–`1` chance the typing indicator drops off mid-message |
+| `PING_REPLY_CHANCE` | `0`–`1` reply (ping) vs plain channel message |
+| `DEBOUNCE_SEC` | Messages arriving within this window get one reply, not three |
+| `MAX_REPLIES_PER_MIN` | Hard ceiling — above it the bot goes quiet, like a person who stopped reading |
+| `PROACTIVE_ENABLED` | `1` = bot sends unprompted messages based on conversation context |
+| `PROACTIVE_BASE_SEC` | Base interval for proactive messages (default: 4s, context-aware: 4-10s) |
+| `PROACTIVE_VARIANCE_SEC` | Random variance in proactive timing (default: 6s) |
+
+## Free tiers: OpenRouter + Hugging Face
+
+Both providers are configured at the same time and the bot walks the chain:
+
+```
+OpenRouter free → Hugging Face fallback
+```
+
+A `429` on one model just moves to the next; nothing is ever sent to Discord
+except a real reply.
+
+**OpenRouter** — free tier gives 50 requests/day across the `:free` models.
+That is the real constraint, which is why `REPLY_CHANCE` matters: a selective
+bot spends its quota on the messages that matter.
+
+**Hugging Face** — a read token is enough to use the router, but the account
+must have inference credits (`huggingface.co/settings/billing`) or every request
+fails with `402 You have no remaining credits`. Until then the HF leg of the
+chain is inert — it is wired and ready, it just has nothing to serve.
+
+Verified working OpenRouter free models (as of now):
+
+| Model | Notes |
+|---|---|
+| `poolside/laguna-s-2.1:free` | Best all-rounder, 1–3.5s |
+| `minimax/minimax-m3.1-flash:free` | Fast, good chat |
+| `google/gemma-4-31b-it:free` | Good, frequently 429s |
+| `meta-llama/llama-3.3-70b-instruct:free` | Smart, slower |
+
+## Making it sound human
+
+The voice is three layers, and all three have to work together — a good prompt
+with a bad post-processor still reads as a bot.
+
+1. **The prompt** (`DEFAULT_SYSTEM_PROMPT` in `bot.py`) is short on rules and
+   long on example exchanges. A long list of rules ("use rizz, always react,
+   always ask a question") teaches a small model to tick a checklist every
+   message, which is exactly how an AI sounds. Examples teach rhythm: short
+   answers, no trailing question, reaction-only replies. The prompt also tells
+   the model **not** to copy the examples verbatim — small models otherwise
+   parrot them, which is the single loudest tell there is.
+2. **The style pass** (`style_reply`) removes the things a person on a phone
+   never types: markdown, capitals, apostrophes, a full stop at the end, double
+   spaces. It also strips assistant habits — "as an ai", "let me know if you
+   need anything", "hope this helps" — because those phrases are the loudest
+   tell there is.
+3. **The quirks** — a quick reaction fired off before the real reply, a
+   dropped or doubled letter somewhere in the message, a reply that goes out in
+   two pieces with a pause between them.
+4. **The restraint** (`engagement_gate`) — before any AI call the bot decides
+   whether to reply, react only, or stay silent. Messages that mention it,
+   reply to it, or come from the target user score high; messages to third
+   parties in a busy channel score low. On top of that there's a per-minute
+   ceiling and a debounce window. **A bot that answers every message is a bot**,
+   so this layer matters more than the wording.
+
+Tuning:
+
+- Too robotic? Lower `REPLY_CHANCE` first (0.7 → 0.5), raise `REACTION_CHANCE`
+  and `TYPO_CHANCE`, and try a bigger model —
+  `poolside/laguna-s-2.1:free` and `meta-llama/llama-3.3-70b-instruct:free` are
+  far more convincing than the 3B default, at the cost of slower replies.
+- Too sloppy? Set `TYPO_CHANCE=0` and `REACTION_CHANCE=0`.
+- Replies too slow? Lower `TYPING_BASE_SEC` and `TYPING_PER_CHAR_SEC`.
+- Replies too fast/robotic? Raise `THINK_BASE_SEC` and `THINK_TAIL_SEC`.
+- Reads like a customer-service bot? Set `TEEN_STYLE=0` and write your own
+  `SYSTEM_PROMPT` — the style pass is what enforces the texting voice.
 
 ## Files
 
@@ -140,6 +256,10 @@ discord-bot/
 ├── requirements.txt    # Python dependencies
 ├── .env.example        # Configuration template (copy to .env)
 ├── .gitignore          # Excludes .env, __pycache__, etc.
+├── start.bat           # Main startup script (shows console window)
+├── startup-hidden.bat  # Hidden startup script (no console, for auto-start)
+├── setup-startup.bat   # Sets up Task Scheduler for auto-start (run as admin)
+├── add-to-startup.bat  # Adds to Windows Startup folder (no admin needed)
 ├── Dockerfile          # Container build
 ├── Procfile            # Heroku-style start command
 ├── render.yaml         # Render.com Blueprint
@@ -178,6 +298,12 @@ discord-bot/
 **Render free tier: bot dies after 15 min**
 - Render spins down free web services when idle
 - Upgrade to paid plan, or use Fly.io's free always-on tier
+
+**Windows auto-start not working**
+- For Task Scheduler: Make sure you ran `setup-startup.bat` as Administrator
+- Check Task Scheduler: Open Task Scheduler → Task Scheduler Library → Find "Discord Bot"
+- For Startup folder: Run `shell:startup` and verify `Discord-Bot-startup.bat` exists
+- Check if the bot is running: Open Task Manager → Look for pythonw.exe or python.exe
 
 ## License & Disclaimer
 

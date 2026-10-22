@@ -314,13 +314,13 @@ MAX_TOKENS = int(os.getenv("MAX_TOKENS", "300"))  # short replies are the human 
 #   typing - the visible typing indicator, scaled to the length of the reply
 #   jitter - random variance, so no two replies ever take the same amount of time
 # ---------------------------------------------------------------------------
-THINK_BASE_SEC = float(os.getenv("THINK_BASE_SEC", "1.5"))  # minimum read/think pause
-THINK_MAX_SEC = float(os.getenv("THINK_MAX_SEC", "6.0"))  # cap on the think pause
-THINK_TAIL_SEC = float(os.getenv("THINK_TAIL_SEC", "18.0"))  # long tail: sometimes a person just sits on it
-TYPING_BASE_SEC = float(os.getenv("TYPING_BASE_SEC", "1.0"))  # minimum typing delay
-TYPING_PER_CHAR_SEC = float(os.getenv("TYPING_PER_CHAR_SEC", "0.028"))  # added per char (a fast texter)
-TYPING_MAX_SEC = float(os.getenv("TYPING_MAX_SEC", "45.0"))  # cap on typing delay
-JITTER_SEC = float(os.getenv("JITTER_SEC", "2.0"))  # random variance added to both
+THINK_BASE_SEC = float(os.getenv("THINK_BASE_SEC", "0.8"))  # minimum read/think pause
+THINK_MAX_SEC = float(os.getenv("THINK_MAX_SEC", "3.0"))  # cap on the think pause
+THINK_TAIL_SEC = float(os.getenv("THINK_TAIL_SEC", "6.0"))  # long tail: sometimes a person just sits on it
+TYPING_BASE_SEC = float(os.getenv("TYPING_BASE_SEC", "0.4"))  # minimum typing delay
+TYPING_PER_CHAR_SEC = float(os.getenv("TYPING_PER_CHAR_SEC", "0.012"))  # added per char (a fast texter)
+TYPING_MAX_SEC = float(os.getenv("TYPING_MAX_SEC", "12.0"))  # cap on typing delay
+JITTER_SEC = float(os.getenv("JITTER_SEC", "1.0"))  # random variance added to both
 
 # ---------------------------------------------------------------------------
 # Latency knobs
@@ -335,11 +335,11 @@ JITTER_SEC = float(os.getenv("JITTER_SEC", "2.0"))  # random variance added to b
 #   TYPING_TAIL_MAX_SEC - how long the typing indicator is held once the text
 #                         is ready (the reply goes out right after)
 # ---------------------------------------------------------------------------
-AI_TIMEOUT_SEC = float(os.getenv("AI_TIMEOUT_SEC", "45"))
+AI_TIMEOUT_SEC = float(os.getenv("AI_TIMEOUT_SEC", "30"))
 AI_MAX_RETRIES = int(os.getenv("AI_MAX_RETRIES", "1"))
 AI_STREAM = os.getenv("AI_STREAM", "1").strip().lower() not in ("0", "false", "no")
 AI_COOLDOWN_SEC = float(os.getenv("AI_COOLDOWN_SEC", "900"))
-TYPING_TAIL_MAX_SEC = float(os.getenv("TYPING_TAIL_MAX_SEC", "3.0"))
+TYPING_TAIL_MAX_SEC = float(os.getenv("TYPING_TAIL_MAX_SEC", "0.5"))
 
 # ---------------------------------------------------------------------------
 # Human behaviour
@@ -426,38 +426,14 @@ proactive_timestamps: Deque[float] = deque(maxlen=200)
 proactive_task: Optional[asyncio.Task] = None
 _last_proactive_channel: Optional[int] = None
 
+# One-shot guard so STARTUP_MESSAGE is only sent once per process, not on
+# every gateway reconnect.
+_startup_message_sent: bool = False
+
 # ---------------------------------------------------------------------------
 # Cached OpenAI clients per endpoint
 # ---------------------------------------------------------------------------
 _clients: Dict[Tuple[str, str], AsyncOpenAI] = {}
-
-
-def _init_local_llm() -> bool:
-    """Initialize the local LLM using llama.cpp."""
-    global _local_llm
-    if _local_llm is not None:
-        return True
-    
-    if not LOCAL_MODEL_PATH:
-        log.warning("LOCAL_MODEL_PATH not set — local model unavailable")
-        return False
-    
-    try:
-        from llama_cpp import Llama
-        _local_llm = Llama(
-            model_path=LOCAL_MODEL_PATH,
-            n_ctx=LOCAL_N_CTX,
-            n_gpu_layers=LOCAL_N_GPU_LAYERS,
-            verbose=LOCAL_VERBOSE,
-        )
-        log.info("Local LLM loaded from %s", LOCAL_MODEL_PATH)
-        return True
-    except ImportError:
-        log.warning("llama-cpp-python not installed — run: pip install llama-cpp-python")
-        return False
-    except Exception as e:
-        log.warning("Failed to load local LLM: %s", e)
-        return False
 
 
 async def _send_proactive_message(channel: discord.abc.Messageable, context_hint: str = "") -> bool:
@@ -1513,6 +1489,14 @@ def engagement_gate(message: discord.Message, text: str) -> Tuple[bool, str]:
     channel_id = message.channel.id
     is_dm = isinstance(message.channel, discord.DMChannel)
 
+    # Target user is the whole point of TARGET_USER_ID — always reply to
+    # them, unless they're explicitly replying to a 3rd party in a busy
+    # channel (which would feel like an interruption).
+    if is_target_user(message.author) and not _replies_to_someone_else(message):
+        if rate_limited():
+            return "react", "target-cooldown"
+        return "reply", "target_user"
+
     # Always answer a direct question of the target in a DM.
     if is_dm:
         if random.random() < REPLY_CHANCE + 0.25:
@@ -1584,7 +1568,23 @@ _pending_task: Dict[int, asyncio.Task] = {}
 
 
 @bot.event
+async def on_connect():
+    log.info("Gateway connected.")
+
+
+@bot.event
+async def on_disconnect():
+    log.warning("Gateway disconnected — discord.py will attempt to resume.")
+
+
+@bot.event
+async def on_resumed():
+    log.info("Gateway session resumed.")
+
+
+@bot.event
 async def on_ready():
+    global proactive_task, _startup_message_sent
     log.warning("========================================")
     log.warning("SELF-BOT ACTIVE — automating a user account violates Discord ToS.")
     log.warning("Use a burner account. You can be banned.")
@@ -1602,12 +1602,21 @@ async def on_ready():
              REPLY_CHANCE * 100, REACT_ONLY_CHANCE * 100, DEBOUNCE_SEC, MAX_REPLIES_PER_MIN)
     # NOTE: Slash commands are NOT supported on user accounts — no tree.sync() here.
 
-    # Optional: send the configured startup message to the target user (once)
-    if STARTUP_MESSAGE and TARGET_USER_ID:
+    # Start the proactive loop (only once per process — it survives reconnects).
+    if PROACTIVE_ENABLED and (proactive_task is None or proactive_task.done()):
+        try:
+            proactive_task = asyncio.create_task(_proactive_loop())
+            log.info("Proactive loop started.")
+        except RuntimeError as e:
+            log.warning("Could not start proactive loop: %s", e)
+
+    # Optional: send the configured startup message to the target user (once per process)
+    if STARTUP_MESSAGE and TARGET_USER_ID and not _startup_message_sent:
         try:
             user = await bot.fetch_user(int(TARGET_USER_ID))
             dm_channel = await user.create_dm()
             await dm_channel.send(STARTUP_MESSAGE)
+            _startup_message_sent = True
             log.info("Sent startup DM to target user %s", user)
         except discord.NotFound:
             log.warning("Startup DM failed: user %s not found.", TARGET_USER_ID)

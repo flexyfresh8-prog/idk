@@ -200,10 +200,45 @@ def _bot_thread_main() -> None:
     log.info("Bot thread starting — provider=%s model=%s",
              bot_module.AI_PROVIDER, bot_module.AI_MODEL)
 
+    # Heartbeat watchdog — force-close the bot if the gateway goes silently
+    # stale (a common failure mode where the TCP socket is open but Discord
+    # has dropped the session). Without this, the dashboard shows "Online"
+    # forever and the bot stops responding.
+    async def _heartbeat_watchdog() -> None:
+        grace = float(os.getenv("BOT_HEARTBEAT_GRACE_SEC", "90"))
+        poll_every = float(os.getenv("BOT_HEARTBEAT_POLL_SEC", "30"))
+        consecutive_stale = 0
+        while True:
+            await asyncio.sleep(poll_every)
+            if state.bot is None or state.bot.is_closed():
+                return
+            try:
+                lat = state.bot.latency
+            except Exception:
+                continue
+            # bot.latency can be inf or NaN before the first heartbeat ACK.
+            if lat != lat or lat == float("inf"):
+                continue
+            if lat > grace:
+                consecutive_stale += 1
+                log.warning("Heartbeat stale (%.1fs, %d in a row) — "
+                            "forcing reconnect.", lat, consecutive_stale)
+                if consecutive_stale >= 2:
+                    log.error("Heartbeat stale for too long — forcing bot.close().")
+                    try:
+                        await state.bot.close()
+                    except Exception as e:
+                        log.error("bot.close() failed: %s", e)
+                    return
+            else:
+                consecutive_stale = 0
+
     started_at = time.time()
     try:
         state.running = True
         state.started_at = started_at
+        # Schedule the watchdog on the bot's event loop.
+        state.loop.create_task(_heartbeat_watchdog())
         state.loop.run_until_complete(bot_module.bot.start(bot_module.DISCORD_USER_TOKEN))
     except Exception as e:
         state.last_error = f"{type(e).__name__}: {e}"
@@ -296,7 +331,14 @@ def stop_bot() -> tuple[bool, str]:
         if state.thread:
             state.thread.join(timeout=15)
         if state.thread and state.thread.is_alive():
-            return False, "Bot did not stop within 15s"
+            # Stuck thread — at least reset the dashboard state so a fresh
+            # Start Bot can take over. The leaked thread will be cleaned up
+            # when the process exits.
+            state.running = False
+            state.started_at = None
+            log.error("Bot did not stop within 15s — state reset, "
+                      "stuck thread leaked (will exit with process).")
+            return False, "Bot did not stop within 15s — state reset"
         state.running = False
         state.started_at = None
         return True, "Bot stopped."
@@ -333,9 +375,21 @@ def dashboard():
 @app.route("/api/health")
 def api_health():
     """A cheap endpoint for the supervisor / for checking the bot is alive."""
+    bot_ready = False
+    bot_latency = None
+    if state.bot is not None:
+        try:
+            bot_ready = state.bot.is_ready()
+            lat = state.bot.latency
+            if lat == lat and lat != float("inf"):  # filter NaN and inf
+                bot_latency = lat
+        except Exception:
+            pass
     return jsonify({
         "ok": True,
         "running": state.running,
+        "bot_ready": bot_ready,
+        "bot_latency": bot_latency,  # seconds since last heartbeat ACK
         "uptime": state.uptime,
         "pid": os.getpid(),
         "restarts": state.restarts,

@@ -60,6 +60,11 @@
     <div class="tab-content">
       <!-- =========== CONTROL TAB =========== -->
       <div class="tab-pane fade show active" id="tab-control" role="tabpanel">
+        <!-- Error banner — only visible when bot failed to start -->
+        <div id="error-banner" class="alert alert-danger" role="alert" style="display:none; font-weight:600; text-align:center;">
+          <i class="bi bi-exclamation-triangle-fill"></i>
+          <span id="error-banner-text"></span>
+        </div>
         <div class="row">
           <div class="col-lg-5">
             <div class="card">
@@ -567,8 +572,25 @@
           : (j.auto_start ? 'Offline' : 'Offline (auto-start off)');
         $('uptime').textContent = fmtUptime(j.uptime);
         $('last-error').textContent = j.last_error || '—';
+        // If there is a last_error AND the bot isn't running, show a bright
+        // red banner so the user can see WHY the bot is dead at a glance.
+        // Most failures were invisible before, which is why the user kept
+        // saying "doesn't work" without knowing why.
+        const errBanner = $('error-banner');
+        const errBannerText = $('error-banner-text');
+        if (errBanner && errBannerText) {
+          if (j.last_error && !running) {
+            errBanner.style.display = '';
+            errBannerText.textContent = ' BOT FAILED TO START: ' + j.last_error +
+              '  —  fix .env (or use the Configuration tab) then click Start Bot.';
+          } else {
+            errBanner.style.display = 'none';
+          }
+        }
         $('btn-start').disabled = running;
-        $('btn-stop').disabled = !running;
+        // Always enable Stop — even if the dashboard thinks the bot isn't
+        // running, the thread may still be alive in a half-dead state.
+        $('btn-stop').disabled = false;
         $('btn-send').disabled = !running;
         $('show-autostart').textContent = j.auto_start ? 'on' : 'off';
         $('show-startedby').textContent = j.started_by || '—';

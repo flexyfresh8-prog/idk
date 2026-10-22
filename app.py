@@ -291,6 +291,30 @@ def _maybe_restart(started_at: float) -> None:
     if state.stop_requested or not AUTO_RESTART:
         return
 
+    # PERMANENT ERRORS — don't bother retrying, the result will be the same.
+    # Common auth/config errors that no amount of restarting will fix:
+    #   - LoginFailure: bad token / quoted token / Discord invalidated it
+    #   - Improper token: same
+    #   - HTTP 401 / 403: Discord rejected the credentials
+    # The dashboard's last_error field will show the user exactly what's wrong.
+    _permanent_markers = (
+        "loginfailure",
+        "improper token",
+        "unauthorized",
+        "forbidden",
+        "401",
+        "403",
+        "invalid token",
+    )
+    if state.last_error:
+        err_lower = state.last_error.lower()
+        for marker in _permanent_markers:
+            if marker in err_lower:
+                log.error("Bot died with a permanent error — NOT auto-restarting. "
+                          "Fix the .env (see last_error in the dashboard) then "
+                          "click Start Bot. Error: %s", state.last_error)
+                return
+
     # It stayed up for a while before dying: that is a blip, not a broken
     # setup, so it gets a fresh budget of restart attempts.
     if time.time() - started_at > 300:
@@ -352,33 +376,40 @@ def start_bot(source: str = "manual") -> tuple[bool, str]:
 
 
 def stop_bot() -> tuple[bool, str]:
-    """Stop the running bot and wait for the thread to finish."""
+    """Stop the running bot and wait for the thread to finish.
+
+    Always cleans up state, even if state.running is False — the dashboard
+    Stop button calls this, and if the bot thread died but the finally
+    block hasn't run yet (or auto-restart is mid-cycle), state.running can
+    be stale. Better to clean up than to refuse.
+    """
     state.stop_requested = True
-    if not state.running or not state.bot or not state.loop:
-        return False, "Bot is not running"
-    try:
-        # Schedule the close on the bot's loop, but do NOT wait on the returned
-        # future. Closing the gateway ends the bot thread's run_until_complete,
-        # which stops the loop before the future's completion callback can run
-        # — so .result() would always time out even though the shutdown worked.
-        # Waiting on the bot thread is what actually observes the shutdown.
-        asyncio.run_coroutine_threadsafe(state.bot.close(), state.loop)
-        if state.thread:
-            state.thread.join(timeout=15)
-        if state.thread and state.thread.is_alive():
-            # Stuck thread — at least reset the dashboard state so a fresh
-            # Start Bot can take over. The leaked thread will be cleaned up
-            # when the process exits.
-            state.running = False
-            state.started_at = None
-            log.error("Bot did not stop within 15s — state reset, "
-                      "stuck thread leaked (will exit with process).")
-            return False, "Bot did not stop within 15s — state reset"
-        state.running = False
-        state.started_at = None
+    was_running = state.running
+
+    # If the bot thread is alive, try to close the gateway cleanly.
+    if state.bot is not None and state.loop is not None and state.thread and state.thread.is_alive():
+        try:
+            asyncio.run_coroutine_threadsafe(state.bot.close(), state.loop)
+            if state.thread:
+                state.thread.join(timeout=15)
+        except Exception as e:
+            log.warning("stop_bot: bot.close() raised %s", e)
+
+    # ALWAYS reset state — even if the thread is stuck. A leaked thread
+    # is fine (it will exit when the process does); a stuck dashboard
+    # showing "Online" forever is much worse.
+    state.running = False
+    state.started_at = None
+    if state.thread and state.thread.is_alive():
+        log.error("Bot thread did not stop within 15s — state reset, "
+                  "stuck thread leaked (will exit with process).")
+        return True, "Bot did not stop within 15s — state reset, click Start Bot to retry"
+    if was_running:
         return True, "Bot stopped."
-    except Exception as e:
-        return False, f"{type(e).__name__}: {e}"
+    # wasn't running, but we cleaned up anyway. Return success so the
+    # dashboard UI doesn't pop an error toast when the user clicks Stop
+    # on an already-stopped bot.
+    return True, "Bot was not running — state cleaned up."
 
 
 def maybe_auto_start() -> None:

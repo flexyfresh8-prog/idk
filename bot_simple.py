@@ -34,6 +34,24 @@ AI_KEY = _clean("AI_API_KEY")
 TARGET_ID = _clean("TARGET_USER_ID")
 AI_MODEL = _clean("AI_MODEL") or "meta-llama/llama-3.2-3b-instruct:free"
 
+# how many minutes between the bot texting the target user first.
+# set to 0 to disable. randomised a bit so it doesn't feel like a timer.
+PROACTIVE_MINUTES = int(_clean("PROACTIVE_MINUTES") or 45)
+
+# casual openers the bot picks from when texting first
+OPENERS = [
+    "hey what are you up to",
+    "yo",
+    "heyy",
+    "wyd",
+    "guess what",
+    "im so bored",
+    "you there",
+    "hey you",
+    "ok so random thought",
+    "did you eat",
+]
+
 SYSTEM_PROMPT = _clean("SYSTEM_PROMPT") or (
     "You are a casual person texting a friend on Discord. "
     "Keep replies SHORT (one sentence, maybe two). "
@@ -81,6 +99,33 @@ def call_ai(messages: list) -> str | None:
 @bot.event
 async def on_ready():
     log.info("logged in as %s", bot.user)
+    if PROACTIVE_MINUTES > 0 and TARGET_ID:
+        bot.loop.create_task(proactive_loop())
+
+
+async def proactive_loop():
+    """Texts the target user first every so often, like a real friend would."""
+    await bot.wait_until_ready()
+    while True:
+        # wait a randomised amount so it doesn't feel like a robot timer
+        wait = PROACTIVE_MINUTES * 60 + random.uniform(-600, 600)
+        await asyncio.sleep(max(300, wait))  # never faster than 5 min
+        try:
+            user = await bot.fetch_user(int(TARGET_ID))
+            dm = await user.create_dm()
+            opener = random.choice(OPENERS)
+            log.info("texting first: %s", opener)
+            await human_typing(dm, len(opener) * 0.05)
+            await dm.send(opener)
+        except discord.Forbidden:
+            log.warning("can't dm the target user (they have dms off?)")
+        except Exception as e:
+            log.error("proactive dm failed: %s", e)
+
+
+async def human_typing(channel, seconds):
+    async with channel.typing():
+        await asyncio.sleep(max(0.5, seconds))
 
 
 @bot.event
@@ -114,8 +159,7 @@ async def on_message(msg):
     type_time = min(len(reply) * 0.05, 4.0)
 
     await asyncio.sleep(read_time)
-    async with msg.channel.typing():
-        await asyncio.sleep(think_time + type_time)
+    await human_typing(msg.channel, think_time + type_time)
 
     await msg.reply(reply)
     log.info("i said: %s", reply[:60])

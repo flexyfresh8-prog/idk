@@ -7,12 +7,12 @@ A tiny Discord self-bot that replies to one person like a real human — random 
 ## Setup
 
 1. Install Python (with "Add to PATH" checked), then double-click **`start.bat`** — it installs dependencies and runs the bot.
-2. Create a `.env` file next to `bot.py` (copy `.env.example`) and fill in:
+2. On first launch the bot asks you for the 3 values in the console and saves them to `.env` automatically:
    - `DISCORD_USER_TOKEN` — your account token (browser: F12 → Network → any request → copy the `authorization` header)
    - `AI_API_KEY` — free key from https://openrouter.ai/keys
    - `TARGET_USER_ID` — right-click the person → Copy User ID (enable Developer Mode in Discord settings)
 
-That's it. The bot now replies to that person (and DMs) with human-like timing, and texts them first every ~45 minutes.
+That's it. The bot now replies to that person (and DMs) with human-like timing, and texts them first every ~45 minutes. To change anything later, edit `.env` — or delete it and run again to redo setup.
 
 ## Files
 

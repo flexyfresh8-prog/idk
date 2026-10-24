@@ -13,17 +13,73 @@ import re
 import random
 import logging
 import asyncio
+from pathlib import Path
 
 import discord
 from dotenv import load_dotenv
 from openai import OpenAI
 
-load_dotenv()
+ENV_PATH = Path(__file__).with_name(".env")
+
+REQUIRED_KEYS = [
+    ("DISCORD_USER_TOKEN", "your discord user token (F12 -> Network -> any request -> authorization header)"),
+    ("AI_API_KEY", "your openrouter key (free, from openrouter.ai/keys)"),
+    ("TARGET_USER_ID", "the discord user id to talk to (right-click user -> Copy User ID)"),
+]
+
+
+def parse_env_file() -> dict:
+    """Read .env manually so nothing ever gets quoted or mangled."""
+    vals = {}
+    if ENV_PATH.exists():
+        for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, _, v = line.partition("=")
+                v = v.strip()
+                while v and v[0] in "\"'" and v[-1] == v[0]:
+                    v = v[1:-1].strip()
+                vals[k.strip()] = v
+    return vals
+
+
+def ensure_env() -> dict:
+    """If anything required is missing, ask for it in the console and
+    write .env deterministically (always the same keys, same order)."""
+    vals = parse_env_file()
+    missing = [k for k, _ in REQUIRED_KEYS if not vals.get(k)]
+    if missing:
+        print("=" * 60)
+        print("first time setup - fill these in (they save to .env)")
+        print("=" * 60)
+        for key, hint in REQUIRED_KEYS:
+            if key in missing:
+                print()
+                print(f"{key}  ({hint})")
+                while True:
+                    v = input("> ").strip().strip('"').strip("'").strip()
+                    if v:
+                        vals[key] = v
+                        break
+                    print("can't be empty, try again")
+        lines = [f"{key}={vals[key]}" for key, _ in REQUIRED_KEYS]
+        for key in ("AI_MODEL", "SYSTEM_PROMPT", "PROACTIVE_MINUTES"):
+            if vals.get(key):
+                lines.append(f"{key}={vals[key]}")
+        ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print()
+        print("saved to .env - starting the bot")
+        print()
+    return vals
+
+
+ENV_VALS = ensure_env()
+load_dotenv(ENV_PATH, override=True)
 
 
 def _clean(v: str) -> str:
     """Strip whitespace and any wrapping quotes."""
-    v = os.getenv(v, "").strip()
+    v = ENV_VALS.get(v) or os.getenv(v, "").strip()
     while v and v[0] in "\"'" and v[-1] == v[0]:
         v = v[1:-1].strip()
     return v
@@ -166,7 +222,7 @@ async def on_message(msg):
 
 
 if __name__ == "__main__":
-    if not DISCORD_TOKEN or not AI_KEY:
-        print("put DISCORD_USER_TOKEN and AI_API_KEY in .env first")
+    if not DISCORD_TOKEN or not AI_KEY or not TARGET_ID:
+        print("something's still missing in .env — delete .env and run again to redo setup")
         raise SystemExit(1)
     bot.run(DISCORD_TOKEN)

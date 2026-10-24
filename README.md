@@ -14,6 +14,14 @@ A tiny Discord self-bot that replies to one person like a real human — random 
 
 That's it. The bot now replies to that person (and DMs) with human-like timing, and texts them first every ~45 minutes. To change anything later, edit `.env` — or delete it and run again to redo setup.
 
+## Built-in protection
+
+- **Auto-restart** — if the internet drops or anything crashes, the bot restarts itself with capped backoff. A bad token stops with a clear message instead of retrying forever.
+- **Secret-safe logs** — the token and API key are scrubbed out of every log line, so a crash dump can never leak them.
+- **Locked-down `.env`** — the config file's permissions are restricted to your Windows user only.
+- **No double replies** — reconnect replays and overlapping AI calls are deduplicated and serialized.
+- **Fail-fast config check** — a mistyped token / user ID / key is caught before login with a hint on how to fix it.
+
 ## Files
 
 ```

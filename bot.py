@@ -10,9 +10,12 @@ Run:  python bot.py
 """
 import os
 import re
+import time
 import random
 import logging
 import asyncio
+import subprocess
+import collections
 from pathlib import Path
 
 import discord
@@ -62,6 +65,7 @@ def ensure_env() -> dict:
                         vals[key] = v
                         break
                     print("can't be empty, try again")
+        lock_down_env_file()
         lines = [f"{key}={vals[key]}" for key, _ in REQUIRED_KEYS]
         for key in ("AI_MODEL", "SYSTEM_PROMPT", "PROACTIVE_MINUTES"):
             if vals.get(key):
@@ -71,6 +75,22 @@ def ensure_env() -> dict:
         print("saved to .env - starting the bot")
         print()
     return vals
+
+
+def lock_down_env_file():
+    """Best-effort: make .env readable only by the current user (Windows ACLs)."""
+    if os.name != "nt" or not ENV_PATH.exists():
+        return
+    user = os.environ.get("USERNAME")
+    if not user:
+        return
+    try:
+        subprocess.run(
+            ["icacls", str(ENV_PATH), "/inheritance:r", "/grant:r", f"{user}:F"],
+            capture_output=True, timeout=10,
+        )
+    except Exception:
+        pass  # never block the bot over file perms
 
 
 ENV_VALS = ensure_env()
@@ -119,6 +139,27 @@ SYSTEM_PROMPT = _clean("SYSTEM_PROMPT") or (
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 log = logging.getLogger("bot")
 
+
+class SecretMask(logging.Filter):
+    """Scrubs secrets out of ANY log line, so a crash dump can never
+    leak the token or the api key into the console / a screenshot."""
+
+    def __init__(self, secrets):
+        super().__init__()
+        self.secrets = [s for s in secrets if s and len(s) > 8]
+
+    def filter(self, record):
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        for s in self.secrets:
+            if s in msg:
+                msg = msg.replace(s, "***")
+        record.msg, record.args = msg, None
+        return True
+
+
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=AI_KEY,
@@ -133,30 +174,82 @@ bot = discord.Client(intents=intents)
 # remember the last few messages per channel so replies have context
 history: dict[int, list] = {}
 
+# dedup: reconnects can replay messages, never answer the same one twice
+_seen_set: set = set()
+_seen_order = collections.deque(maxlen=512)
+
+# one reply at a time per channel, so long AI calls can't overlap
+channel_locks: dict = collections.defaultdict(asyncio.Lock)
+
+# reconnect counter, reset to 0 after every successful login
+runtime = {"attempt": 0, "proactive_task": None}
+
 
 def is_target(author) -> bool:
     return bool(TARGET_ID) and str(author.id) == TARGET_ID
 
 
+def mark_seen(mid: int):
+    if mid in _seen_set:
+        return True
+    _seen_set.add(mid)
+    _seen_order.append(mid)
+    while len(_seen_order) >= 512:
+        old = _seen_order.popleft()
+        _seen_set.discard(old)
+    return False
+
+
 def call_ai(messages: list) -> str | None:
-    try:
-        r = client.chat.completions.create(
-            model=AI_MODEL,
-            messages=messages,
-            max_tokens=80,
-            temperature=1.0,
-        )
-        return (r.choices[0].message.content or "").strip()
-    except Exception as e:
-        log.error("ai error: %s", e)
-        return None
+    """Runs in a worker thread. Retries 3x with backoff, survives hiccups."""
+    for attempt in range(3):
+        try:
+            r = client.chat.completions.create(
+                model=AI_MODEL,
+                messages=messages,
+                max_tokens=80,
+                temperature=1.0,
+                timeout=30,
+            )
+            content = (r.choices[0].message.content or "").strip()
+            if content:
+                return content
+        except Exception as e:
+            log.warning("ai try %d/3 failed: %s", attempt + 1, str(e)[:120])
+        if attempt < 2:
+            time.sleep(1.5 * (2 ** attempt) + random.random())
+    return None
+
+
+def validate_config():
+    """Fail fast with a human message instead of a cryptic login error."""
+    problems = []
+    if not (len(DISCORD_TOKEN) >= 50 and
+            (DISCORD_TOKEN.startswith("mfa.") or DISCORD_TOKEN.count(".") >= 2)):
+        problems.append(
+            "DISCORD_USER_TOKEN doesn't look like a real token. "
+            "re-copy it: browser -> F12 -> Network -> any request -> authorization header")
+    if not TARGET_ID.isdigit():
+        problems.append(
+            "TARGET_USER_ID must be just numbers (right-click user -> Copy User ID)")
+    if len(AI_KEY) < 20:
+        problems.append(
+            "AI_API_KEY looks too short. re-copy it from openrouter.ai/keys")
+    if problems:
+        for p in problems:
+            print("x", p)
+        print("\nto fix: delete .env and run start.bat again")
+        raise SystemExit(1)
 
 
 @bot.event
 async def on_ready():
     log.info("logged in as %s", bot.user)
+    runtime["attempt"] = 0  # we made it, reset the restart backoff
     if PROACTIVE_MINUTES > 0 and TARGET_ID:
-        bot.loop.create_task(proactive_loop())
+        task = runtime.get("proactive_task")
+        if task is None or task.done():  # never spawn it twice
+            runtime["proactive_task"] = bot.loop.create_task(proactive_loop())
 
 
 async def proactive_loop():
@@ -186,43 +279,96 @@ async def human_typing(channel, seconds):
 
 @bot.event
 async def on_message(msg):
-    if msg.author == bot.user or msg.author.bot:
-        return
-    # respond to: the target user (anywhere), mentions, and dms
-    if not (is_target(msg.author) or bot.user in msg.mentions
-            or isinstance(msg.channel, discord.DMChannel)):
-        return
+    try:
+        if msg.author == bot.user or msg.author.bot:
+            return
+        # respond to: the target user (anywhere), mentions, and dms
+        if not (is_target(msg.author) or bot.user in msg.mentions
+                or isinstance(msg.channel, discord.DMChannel)):
+            return
+        # reconnects can replay old messages - never answer twice
+        if mark_seen(msg.id):
+            return
 
-    text = re.sub(r"<@!?\d+>\s*", "", msg.content).strip()
-    if not text:
-        return
+        text = re.sub(r"<@!?\d+>\s*", "", msg.content).strip()
+        if not text:
+            return
 
-    log.info("they said: %s", text[:60])
+        log.info("they said: %s", text[:60])
 
-    # small conversation memory so it doesn't repeat itself
-    h = history.setdefault(msg.channel.id, [])
-    h.append({"role": "user", "content": text})
-    h[:] = h[-6:]
+        # one reply at a time per channel, so AI calls can't overlap
+        lock = channel_locks[msg.channel.id]
+        async with lock:
+            # small conversation memory so it doesn't repeat itself
+            h = history.setdefault(msg.channel.id, [])
+            h.append({"role": "user", "content": text})
+            h[:] = h[-6:]
 
-    reply = call_ai([{"role": "system", "content": SYSTEM_PROMPT}] + h)
-    if not reply:
-        return
-    h.append({"role": "assistant", "content": reply})
+            # AI call runs in a worker thread, so the connection never stalls
+            reply = await asyncio.get_running_loop().run_in_executor(
+                None, call_ai, [{"role": "system", "content": SYSTEM_PROMPT}] + h)
+            if not reply:
+                log.warning("ai gave nothing, staying quiet this once")
+                return
+            h.append({"role": "assistant", "content": reply})
 
-    # human timing: read it, think about it, then type it
-    read_time = random.uniform(1.0, 3.0)
-    think_time = random.uniform(0.5, 2.0)
-    type_time = min(len(reply) * 0.05, 4.0)
+            # human timing: read it, think about it, then type it
+            read_time = random.uniform(1.0, 3.0)
+            think_time = random.uniform(0.5, 2.0)
+            type_time = min(len(reply) * 0.05, 4.0)
 
-    await asyncio.sleep(read_time)
-    await human_typing(msg.channel, think_time + type_time)
+            await asyncio.sleep(read_time)
+            await human_typing(msg.channel, think_time + type_time)
 
-    await msg.reply(reply)
-    log.info("i said: %s", reply[:60])
+            await msg.reply(reply)
+            log.info("i said: %s", reply[:60])
+    except Exception as e:
+        # one weird message must never kill the handler chain
+        log.error("on_message failed: %s", str(e)[:160])
+
+
+@bot.event
+async def on_error(event, *args, **kwargs):
+    log.error("error in %s (swallowed, bot keeps running)", event)
+
+
+def main():
+    if not DISCORD_TOKEN or not AI_KEY or not TARGET_ID:
+        print("something's missing in .env - delete .env and run start.bat again")
+        raise SystemExit(1)
+    validate_config()
+
+    # scrub secrets out of every log line before anything can crash
+    mask = SecretMask([DISCORD_TOKEN, AI_KEY])
+    for h in logging.getLogger().handlers:
+        h.addFilter(mask)
+
+    log.info("running - ctrl+c to stop")
+    while True:
+        try:
+            bot.run(DISCORD_TOKEN)
+            log.info("stopped cleanly")
+            break
+        except KeyboardInterrupt:
+            break
+        except discord.LoginFailure:
+            print("\nthat discord token was rejected - wrong or expired.")
+            print("get a fresh one, then delete .env and run start.bat again")
+            raise SystemExit(1)
+        except Exception as e:
+            runtime["attempt"] += 1
+            n = runtime["attempt"]
+            delay = min(120, 5 * 2 ** min(n, 5)) + random.uniform(0, 3)
+            log.error("crashed (%s) - auto-restarting in %ds (attempt %d)",
+                      type(e).__name__, int(delay), n)
+            time.sleep(delay)
+            # fresh state for the new session
+            history.clear()
+            channel_locks.clear()
+            _seen_set.clear()
+            _seen_order.clear()
+            runtime["proactive_task"] = None
 
 
 if __name__ == "__main__":
-    if not DISCORD_TOKEN or not AI_KEY or not TARGET_ID:
-        print("something's still missing in .env — delete .env and run again to redo setup")
-        raise SystemExit(1)
-    bot.run(DISCORD_TOKEN)
+    main()

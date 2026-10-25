@@ -22,6 +22,17 @@ import discord
 from dotenv import load_dotenv
 from openai import OpenAI
 
+# pre-flight: there's a junk PyPI package named "discord" that shadows the
+# real self-bot fork. catch it here with a clear message, not a traceback.
+if not hasattr(discord, "Intents") or not hasattr(discord, "Client"):
+    print("the wrong 'discord' package is installed (the placeholder one,")
+    print("not the self-bot fork discord.py-self).")
+    print()
+    print("fix it: double-click start.bat again, OR run in this folder:")
+    print("  pip uninstall -y discord discord.py")
+    print("  pip install discord.py-self")
+    raise SystemExit(1)
+
 ENV_PATH = Path(__file__).with_name(".env")
 
 REQUIRED_KEYS = [
